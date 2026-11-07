@@ -268,6 +268,15 @@
     };
     // 示例课程打标记，用于界面提示与「清除示例数据」
     if (c.demo === true) course.demo = true;
+    // B 站导入来源：只有明确标记为 bili 才保留视频标题与 BV 号，
+    // 旧数据没有这些字段时照常读取，手动登记的课程永远不会被当成 B 站来源
+    if (c.source === "bili") {
+      course.source = "bili";
+      const bv = typeof c.bvid === "string" ? c.bvid.match(/BV[0-9A-Za-z]{10}/) : null;
+      if (bv) course.bvid = bv[0];
+      const title = typeof c.videoTitle === "string" ? c.videoTitle.trim() : "";
+      if (title) course.videoTitle = title.slice(0, 200);
+    }
     return course;
   }
 
@@ -470,6 +479,15 @@
       ? ' · <span class="warn-txt">' + st.invalid + " 节未设时长，未计入</span>"
       : "";
 
+    // 只有 B 站导入的课程才显示视频标题；手动登记的课程不留空占位
+    const videoLine =
+      course.source === "bili" && course.videoTitle
+        ? '<p class="course-video"><span class="bili-badge">B 站视频</span>' +
+          '<span class="video-title">' +
+          escapeHtml(course.videoTitle) +
+          "</span></p>"
+        : "";
+
     const lessonsHtml = open
       ? '<div class="lessons">' +
         course.lessons
@@ -490,6 +508,7 @@
       escapeHtml(course.name) +
       (course.demo ? '<span class="demo-tag">示例</span>' : "") +
       "</h3>" +
+      videoLine +
       '<p class="mono course-meta">' +
       "加权 <span class=\"pct\">" +
       st.pct +
@@ -508,7 +527,8 @@
       course.id +
       '" aria-label="删除《' +
       escapeHtml(course.name) +
-      '》" title="删除这门课">✕</button>' +
+      '》" title="删除这门课"><span class="icon-x" aria-hidden="true">✕</span>' +
+      '<span class="del-label" aria-hidden="true">删除课程</span></button>' +
       "</div>" +
       '<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
       st.pct +
@@ -556,13 +576,13 @@
       '<span class="l-idx mono">' +
       (idx + 1) +
       "</span>" +
-      '<label class="l-field"><span>总时长</span>' +
+      '<label class="l-field l-total"><span>总时长</span>' +
       '<input class="l-input mono" data-k="total" value="' +
       totalVal +
       '" placeholder="0:00" aria-label="第 ' +
       (idx + 1) +
       ' 节总时长"></label>' +
-      '<label class="l-field"><span>已看</span>' +
+      '<label class="l-field l-watched"><span>已看</span>' +
       '<input class="l-input mono" data-k="watched" value="' +
       watchedVal +
       '" placeholder="0:00" aria-label="第 ' +
@@ -575,17 +595,17 @@
       (pct === null ? "—" : pct + "%") +
       "</span>" +
       '<span class="l-actions">' +
-      '<button type="button" class="mini" data-act="add15" title="加 15 分钟">+15</button>' +
+      '<button type="button" class="mini" data-act="add15" title="加 15 分钟">+15 分</button>' +
       '<button type="button" class="mini" data-act="full" title="标记为已看完">看完</button>' +
-      '<button type="button" class="icon-btn l-del" data-act="del" aria-label="删除第 ' +
+      '<button type="button" class="mini danger l-del" data-act="del" aria-label="删除第 ' +
       (idx + 1) +
-      ' 节" title="删除这一节">✕</button>' +
-      "</span>" +
+      ' 节" title="删除这一节">删除</button>' +
       (lesson.url
         ? '<a class="l-open" href="' +
           escapeHtml(lesson.url) +
           '" target="_blank" rel="noopener noreferrer" title="在新标签打开这一节的 B 站视频">B 站 ↗</a>'
         : "") +
+      "</span>" +
       (noTotal
         ? '<span class="l-warn">未填总时长，这一节不计入统计</span>'
         : "") +
@@ -1227,6 +1247,19 @@
     };
   }
 
+  /** 找可覆盖的已有课程：先按同一 BV 号，再退回同名（兼容旧数据的课程没有 bvid） */
+  function findImportDup(p) {
+    if (p.bvid) {
+      const byBv = state.courses.find(function (c) {
+        return c.source === "bili" && c.bvid === p.bvid;
+      });
+      if (byBv) return byBv;
+    }
+    return state.courses.find(function (c) {
+      return c.name === p.name;
+    });
+  }
+
   /** 把校验结果渲染成预览，等用户确认 */
   function showImportResult(value) {
     pendingImport = value;
@@ -1248,7 +1281,7 @@
       "（" +
       st.count +
       " 节待看）" +
-      (value.clipped ? " · 标题超过 40 字，已截断" : "");
+      (value.clipped ? " · 标题超过 40 字，课程名已截断，完整标题会显示在卡片上" : "");
 
     el.previewBody.innerHTML = value.lessons
       .map(function (l) {
@@ -1266,18 +1299,18 @@
       })
       .join("");
 
-    const dup = state.courses.find(function (c) {
-      return c.name === value.name;
-    });
+    const dup = findImportDup(value);
     if (dup) {
+      const sameBv = dup.source === "bili" && dup.bvid === value.bvid;
       el.previewDup.hidden = false;
       el.dupNew.checked = true;
       el.dupText.textContent =
-        "已有同名课程《" +
+        (sameBv ? "同一个 BV 号（" + value.bvid + "）" : "同名") +
+        "已有课程《" +
         dup.name +
         "》（" +
         dup.lessons.length +
-        " 节）。确认前请选择：新增一门同名课程，还是覆盖它。";
+        " 节）。确认前请选择：新增一门课程，还是覆盖它（视频标题会一起更新）。";
       el.confirmImportBtn.textContent = "按所选方式导入";
     } else {
       el.previewDup.hidden = true;
@@ -1304,9 +1337,7 @@
     const p = pendingImport;
     if (!p) return;
 
-    const dup = state.courses.find(function (c) {
-      return c.name === p.name;
-    });
+    const dup = findImportDup(p);
     const overwrite = !!(dup && el.dupOverwrite.checked);
 
     const lessons = p.lessons.map(function (l) {
@@ -1324,6 +1355,11 @@
         }
       });
       dup.lessons = lessons;
+      // 同一次导入的新标题要以覆盖后的为准
+      dup.name = p.name;
+      dup.source = "bili";
+      dup.bvid = p.bvid;
+      dup.videoTitle = p.title;
       openIds.add(dup.id);
       saveState();
       renderAll();
@@ -1336,7 +1372,14 @@
           (kept ? "，沿用 " + kept + " 节已看时长" : "")
       );
     } else {
-      const course = { id: makeId(), name: p.name, lessons: lessons };
+      const course = {
+        id: makeId(),
+        name: p.name,
+        lessons: lessons,
+        source: "bili",
+        bvid: p.bvid,
+        videoTitle: p.title,
+      };
       state.courses.push(course);
       seenIds.add(course.id);
       openIds.add(course.id);

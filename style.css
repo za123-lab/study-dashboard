@@ -558,6 +558,38 @@ input:focus {
   word-break: break-word;
 }
 
+/* B 站视频标题：与课程名分开一行，最多两行，不撑破卡片 */
+.course-video {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.course-video .video-title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bili-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--red);
+  white-space: nowrap;
+  border: 1px solid rgba(192, 69, 58, 0.35);
+  border-radius: 2px;
+}
+
 /* 示例课程标记 */
 .demo-tag {
   margin-left: 8px;
@@ -612,6 +644,11 @@ input:focus {
 .icon-btn:focus-visible {
   outline: 2px solid var(--red);
   outline-offset: 1px;
+}
+
+/* 桌面端只显示 ✕，窄屏换成「删除课程」文字，避免只剩符号让人猜 */
+.del-label {
+  display: none;
 }
 
 /* 细进度条 */
@@ -782,10 +819,15 @@ input:focus {
   outline-offset: 1px;
 }
 
-.icon-btn.l-del {
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
+.mini.danger {
+  color: var(--red);
+  border-color: rgba(192, 69, 58, 0.35);
+}
+
+.mini.danger:hover {
+  color: var(--paper-2);
+  border-color: var(--red);
+  background: var(--red);
 }
 
 .course-toggle {
@@ -1237,10 +1279,31 @@ input:focus {
 .foot-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 22px;
+}
+
+.foot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 分组标题只在窄屏显示，桌面端靠间距分组即可 */
+.foot-group-label {
+  display: none;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+
+.foot-btns {
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
-.foot-actions .btn {
+.foot-btns .btn {
   padding: 7px 14px;
   font-size: 12.5px;
 }
@@ -1354,31 +1417,32 @@ input:focus {
     padding: 16px 16px 18px;
   }
 
-  .lesson {
-    gap: 6px;
+  /* 触控尺寸统一：所有按钮至少 44px 高 */
+  .btn {
+    min-height: 44px;
+    padding: 11px 18px;
+    font-size: 14px;
   }
 
-  .l-field > span {
-    display: none;
+  input[type="text"],
+  input[type="number"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"] {
+    min-height: 44px;
+    font-size: 16px; /* 16px 可避免 iOS 聚焦时页面自动放大 */
   }
 
-  .l-input {
-    width: 62px;
-  }
-
-  .l-idx {
-    width: 20px;
+  .secret-toggle {
+    min-height: 44px;
+    padding: 0 14px;
   }
 
   .add-form {
-    gap: 12px;
+    gap: 14px;
   }
 
   .add-form .btn.primary {
-    width: 100%;
-  }
-
-  .field:not(.grow) input {
     width: 100%;
   }
 
@@ -1386,9 +1450,178 @@ input:focus {
     flex: 1 1 120px;
   }
 
+  .field:not(.grow) input {
+    width: 100%;
+  }
+
+  /* 删除课程：不只留一个 ✕，给足点击面积并写出文字 */
+  .course-head {
+    gap: 10px;
+  }
+
+  .icon-btn.del {
+    width: auto;
+    min-width: 44px;
+    height: 44px;
+    padding: 0 12px;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: var(--ink-soft);
+    border-color: var(--line);
+    border-radius: var(--radius);
+  }
+
+  .icon-btn.del .icon-x {
+    display: none;
+  }
+
+  .icon-btn.del .del-label {
+    display: inline;
+  }
+
+  .course-toggle,
+  .add-lesson {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+
+  .course-foot {
+    align-items: stretch;
+  }
+
+  /* 课时行：总时长 / 已看 两列 + 进度条 + 独立一行按钮，不再挤成一条 */
+  .lesson {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr);
+    row-gap: 8px;
+    column-gap: 8px;
+    padding: 12px 0;
+  }
+
+  .l-idx {
+    grid-column: 1;
+    grid-row: 1;
+    width: auto;
+    align-self: center;
+  }
+
+  .l-total {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .l-watched {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .l-field {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .l-field > span {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+
+  .l-input {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .l-bar {
+    grid-column: 1 / span 2;
+    grid-row: 2;
+    margin: 0;
+  }
+
+  .l-pct {
+    grid-column: 3;
+    grid-row: 2;
+    width: auto;
+    align-self: center;
+  }
+
+  .l-actions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .l-actions .mini {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 8px 6px;
+    font-size: 13px;
+  }
+
+  .l-actions .l-open {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .l-warn {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    padding-left: 0;
+  }
+
+  .import-actions .btn,
+  .sync-actions .btn,
+  .modal-actions .btn,
+  .demo-notice .btn,
+  .btn-inline {
+    min-height: 44px;
+  }
+
+  .import-actions .btn,
+  .sync-actions .btn {
+    flex: 1 1 40%;
+  }
+
+  .dup-opt {
+    min-height: 44px;
+  }
+
+  /* 页脚：备份与清空分成两组，各占一行，危险操作单独成组 */
   .foot {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .foot-actions {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .foot-group {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .foot-group-label {
+    display: block;
+  }
+
+  .foot-btns .btn {
+    flex: 1 1 140px;
+    min-height: 44px;
+    font-size: 13.5px;
   }
 }
 

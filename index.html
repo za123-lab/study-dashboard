@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
   <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css?v=20261108-2">
+  <link rel="stylesheet" href="style.css?v=20261108-3">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -216,8 +216,8 @@
         </div>
         <div class="preview-dup" id="previewDup" hidden>
           <p class="dup-cap" id="dupText"></p>
-          <label class="dup-opt"><input type="radio" name="dupMode" value="new" id="dupNew" checked><span>新增为同名课程</span></label>
-          <label class="dup-opt"><input type="radio" name="dupMode" value="overwrite" id="dupOverwrite"><span>覆盖已有同名课程（按节序沿用已看时长）</span></label>
+          <label class="dup-opt"><input type="radio" name="dupMode" value="new" id="dupNew" checked><span>新增一门课程（保留原课程）</span></label>
+          <label class="dup-opt"><input type="radio" name="dupMode" value="overwrite" id="dupOverwrite"><span>覆盖已有课程（按节序沿用已看时长，视频标题一起更新）</span></label>
         </div>
         <div class="import-actions">
           <button type="button" class="btn primary" id="confirmImportBtn">确认导入</button>
@@ -229,11 +229,21 @@
     <footer class="foot reveal">
       <p class="foot-note">数据默认保存在本浏览器中；登录云同步后还会备份到 Supabase。换设备或清理缓存前建议先导出备份。</p>
       <div class="foot-actions">
-        <button class="btn ghost" id="exportBtn">导出数据</button>
-        <button class="btn ghost" id="importBtn">导入数据</button>
-        <input type="file" id="importFile" accept="application/json,.json" hidden>
-        <button class="btn ghost" id="resetActivityBtn">重置打卡记录</button>
-        <button class="btn ghost danger" id="clearBtn">清空数据</button>
+        <div class="foot-group">
+          <span class="foot-group-label">备份 / 恢复</span>
+          <div class="foot-btns">
+            <button class="btn ghost" id="exportBtn">导出数据</button>
+            <button class="btn ghost" id="importBtn">导入数据</button>
+            <input type="file" id="importFile" accept="application/json,.json" hidden>
+          </div>
+        </div>
+        <div class="foot-group">
+          <span class="foot-group-label">清空类操作 · 不可撤销</span>
+          <div class="foot-btns">
+            <button class="btn ghost" id="resetActivityBtn">重置打卡记录</button>
+            <button class="btn ghost danger" id="clearBtn">清空数据</button>
+          </div>
+        </div>
       </div>
     </footer>
   </main>
@@ -255,7 +265,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-2"></script>
+  <script src="app.js?v=20261108-3"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {
