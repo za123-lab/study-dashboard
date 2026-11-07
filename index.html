@@ -107,42 +107,71 @@
       <button class="btn ghost" id="seedBtn">填入示例课程</button>
     </div>
 
-    <!-- 设置：云同步（可选，不填也能正常用） -->
+    <!-- 设置：云同步（Supabase，可选；不登录也能正常用） -->
     <section class="panel reveal" id="syncPanel">
       <div class="panel-head">
         <h2>设置 · 云同步</h2>
-        <p class="panel-cap">可选：把进度备份到自己的 Cloudflare D1，多设备用同一同步码互通</p>
+        <p class="panel-cap">可选：登录 Supabase 后，进度自动备份到云端，多设备互通</p>
       </div>
 
-      <div class="sync-grid">
-        <label class="field grow">
-          <span>同步码（当作口令，至少 16 位）</span>
-          <div class="secret-wrap">
-            <input type="password" id="syncCode" class="mono" autocomplete="off" spellcheck="false"
-              placeholder="自己定一个至少 16 位的口令，不要外传">
-            <button type="button" class="btn ghost secret-toggle" id="syncCodeToggle" aria-pressed="false">显示</button>
-          </div>
+      <!-- 连接配置：只有未登录时显示，避免和登录态混在一起 -->
+      <div id="supaConfigBlock">
+        <div class="sync-grid">
+          <label class="field grow">
+            <span>Supabase 项目地址</span>
+            <input type="url" id="supaUrl" class="mono" spellcheck="false"
+              placeholder="https://xxxx.supabase.co">
+          </label>
+          <label class="field grow">
+            <span>anon key（可公开，安全由 RLS 保证）</span>
+            <div class="secret-wrap">
+              <input type="password" id="supaKey" class="mono" autocomplete="off" spellcheck="false"
+                placeholder="eyJhbGciOiJIUzI1NiIs...">
+              <button type="button" class="btn ghost secret-toggle" id="supaKeyToggle" aria-pressed="false">显示</button>
+            </div>
+          </label>
+        </div>
+        <div class="sync-actions">
+          <button type="button" class="btn ghost" id="supaCfgSave">保存连接配置</button>
+          <button type="button" class="btn ghost" id="supaCfgForget" hidden>清除配置</button>
+        </div>
+        <p class="sync-hint">URL 与 anon key 只存在这台设备的浏览器里，不会写进仓库。anon key 本来就是给浏览器用的公开密钥，数据安全靠表上的 RLS 策略。</p>
+      </div>
+
+      <!-- 未登录 -->
+      <div id="supaLoginBlock" hidden>
+        <form id="supaLoginForm" class="add-form">
+          <label class="field grow">
+            <span>邮箱</span>
+            <input type="email" id="supaEmail" autocomplete="username" spellcheck="false"
+              placeholder="you@example.com" required>
+          </label>
+          <label class="field grow">
+            <span>密码</span>
+            <input type="password" id="supaPassword" autocomplete="current-password"
+              placeholder="账号密码" required>
+          </label>
+          <button type="submit" class="btn primary" id="supaLoginBtn">登录</button>
+        </form>
+        <p class="sync-status mono" id="supaAuthStatus" role="status" aria-live="polite">未登录</p>
+        <p class="sync-hint">账号在 Supabase 控制台创建（Authentication → Users → Add user），只服务自己一个人。</p>
+      </div>
+
+      <!-- 已登录 -->
+      <div id="supaSessionBlock" hidden>
+        <p class="sync-session mono">已登录：<span id="supaWho">—</span></p>
+        <label class="sync-auto">
+          <input type="checkbox" id="supaAuto" checked>
+          <span>每次修改后自动同步（防抖 1.5 秒）</span>
         </label>
-        <label class="field grow">
-          <span>Worker 地址</span>
-          <input type="url" id="syncBase" class="mono" spellcheck="false"
-            placeholder="https://study-dashboard-sync.xxx.workers.dev">
-        </label>
+        <div class="sync-actions">
+          <button type="button" class="btn primary" id="supaPushBtn">立即上传</button>
+          <button type="button" class="btn ghost" id="supaPullBtn">立即拉取</button>
+          <button type="button" class="btn ghost" id="supaLogoutBtn">退出登录</button>
+        </div>
+        <p class="sync-status mono" id="supaSyncStatus" role="status" aria-live="polite">尚未同步</p>
+        <p class="sync-hint">断网时照常记在本机，联网后会自动补传。若云端与本地都被改过，会弹窗让你选「以本地为准 / 以云端为准」，不会自动覆盖。</p>
       </div>
-
-      <label class="sync-auto">
-        <input type="checkbox" id="syncAuto">
-        <span>每次修改后自动上传（可选）</span>
-      </label>
-
-      <div class="sync-actions">
-        <button type="button" class="btn primary" id="syncUploadBtn">立即上传</button>
-        <button type="button" class="btn ghost" id="syncPullBtn">立即拉取</button>
-        <button type="button" class="btn ghost" id="syncForgetBtn">清除本机同步设置</button>
-      </div>
-
-      <p class="sync-status mono" id="syncStatus" role="status" aria-live="polite">尚未同步</p>
-      <p class="sync-hint">同步码只存在本机；同一同步码可在另一台设备拉取。上传时若云端已被别处改过，会先弹窗让你选择保留哪一份。断网时所有记录仍在本地，不影响使用。</p>
     </section>
 
     <!-- B 站课程导入：提示词 → AI 输出 JSON → 预览 → 写入（放在最后，不打断主流程） -->
@@ -197,7 +226,7 @@
     </section>
 
     <footer class="foot reveal">
-      <p class="foot-note">数据保存在本浏览器中，换设备或清理缓存前请先导出备份。</p>
+      <p class="foot-note">数据默认保存在本浏览器中；登录云同步后还会备份到 Supabase。换设备或清理缓存前建议先导出备份。</p>
       <div class="foot-actions">
         <button class="btn ghost" id="exportBtn">导出数据</button>
         <button class="btn ghost" id="importBtn">导入数据</button>

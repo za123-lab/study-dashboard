@@ -8,9 +8,11 @@
   "use strict";
 
   const STORE_KEY = "study-log-v1"; // 沿用旧 key，老数据读取后自动迁移
-  const SYNC_KEY = "study-sync-v1"; // 云同步设置，与进度数据分开存（同步码不会跟随导出）
-  const SYNC_CODE_MIN = 16;
-  const SYNC_TIMEOUT = 15000;
+  const SUPA_CFG_KEY = "study-supabase-v1"; // Supabase 连接配置，不随导出的进度文件走
+  const SUPA_SESSION_KEY = "study-supabase-session-v1"; // 登录态（access/refresh token）
+  const SUPA_META_KEY = "study-supabase-meta-v1"; // 每个账号的云端版本号与上次同步快照
+  const SUPA_TIMEOUT = 15000;
+  const SYNC_DEBOUNCE = 1500;
   const DEFAULT_LESSON_MIN = 45; // 旧数据迁移时，每节按 45 分钟折算
   const BILI_URL_RE = /^https?:\/\/(www\.)?bilibili\.com\/video\/BV[0-9A-Za-z]{10}/;
 
@@ -35,12 +37,16 @@
   const openIds = new Set();
   const seenIds = new Set();
 
-  // 云同步运行状态（同步码等设置存在 localStorage）
-  let syncCfg = null; // { code, baseUrl, auto, updatedAt, lastSyncAt }
-  let syncBusy = false;
+  // 云同步运行状态（Supabase 配置、登录态、云端版本号都存 localStorage）
+  let supaCfg = null; // { url, anonKey, auto }
+  let supaSession = null; // { accessToken, refreshToken, expiresAt, userId, email }
+  let supaMeta = null; // { userId, baseRev, syncedHash, lastSyncAt }
+  let supaBusy = false;
+  let supaReady = false; // 登录后的首次云端核对是否完成
+  let supaRefreshPromise = null;
   let suppressAutoSync = false;
   let autoSyncTimer = null;
-  let pendingConflict = null;
+  let pendingConflict = null; // { remote: { data, rev, updatedAt }, reason }
 
   state = loadState();
 
@@ -361,14 +367,26 @@
     dupOverwrite: $("#dupOverwrite"),
     confirmImportBtn: $("#confirmImportBtn"),
     cancelImportBtn: $("#cancelImportBtn"),
-    syncCode: $("#syncCode"),
-    syncCodeToggle: $("#syncCodeToggle"),
-    syncBase: $("#syncBase"),
-    syncAuto: $("#syncAuto"),
-    syncUploadBtn: $("#syncUploadBtn"),
-    syncPullBtn: $("#syncPullBtn"),
-    syncForgetBtn: $("#syncForgetBtn"),
-    syncStatus: $("#syncStatus"),
+    supaConfigBlock: $("#supaConfigBlock"),
+    supaUrl: $("#supaUrl"),
+    supaKey: $("#supaKey"),
+    supaKeyToggle: $("#supaKeyToggle"),
+    supaCfgSave: $("#supaCfgSave"),
+    supaCfgForget: $("#supaCfgForget"),
+    supaLoginBlock: $("#supaLoginBlock"),
+    supaLoginForm: $("#supaLoginForm"),
+    supaEmail: $("#supaEmail"),
+    supaPassword: $("#supaPassword"),
+    supaLoginBtn: $("#supaLoginBtn"),
+    supaAuthStatus: $("#supaAuthStatus"),
+    supaSessionBlock: $("#supaSessionBlock"),
+    supaWho: $("#supaWho"),
+    supaAuto: $("#supaAuto"),
+    supaPushBtn: $("#supaPushBtn"),
+    supaPullBtn: $("#supaPullBtn"),
+    supaLogoutBtn: $("#supaLogoutBtn"),
+    supaSyncStatus: $("#supaSyncStatus"),
+    syncPanel: $("#syncPanel"),
     syncConflict: $("#syncConflict"),
     conflictNote: $("#conflictNote"),
     conflictTakeRemote: $("#conflictTakeRemote"),
@@ -1372,77 +1390,846 @@
     }
   }
 
-  // ---------- 云同步（可选，Cloudflare Workers + D1） ----------
-  // 契约：GET /sync/{code} → { data, updatedAt }；PUT 带 baseUpdatedAt，
-  // 版本不一致返回 409 且附服务端内容。任何冲突都必须由用户选择，绝不自动覆盖。
+  // ---------- 云同步（可选，Supabase Auth + PostgREST） ----------
+  // 云端只存一行 { user_id, data(jsonb), rev, updated_at }。
+  // 上传用 rev 做乐观锁：PATCH ...&rev=eq.{baseRev}，命中 0 行即冲突。
+  // 任何冲突都必须由用户选择，绝不自动覆盖。
 
-  function loadSyncCfg() {
-    const fallback = {
-      code: "",
-      baseUrl: "",
-      auto: false,
-      updatedAt: null,
-      lastSyncAt: 0,
-    };
+  function loadStoredJson(key, fallback) {
     try {
-      const raw = localStorage.getItem(SYNC_KEY);
+      const raw = localStorage.getItem(key);
       if (!raw) return fallback;
-      const o = JSON.parse(raw);
-      return {
-        code: typeof o.code === "string" ? o.code : "",
-        baseUrl: typeof o.baseUrl === "string" ? o.baseUrl : "",
-        auto: !!o.auto,
-        updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : null,
-        lastSyncAt: typeof o.lastSyncAt === "number" ? o.lastSyncAt : 0,
-      };
+      const parsed = JSON.parse(raw);
+      return parsed == null ? fallback : parsed;
     } catch (err) {
+      console.warn("读取本地配置失败：" + key, err);
       return fallback;
     }
   }
 
-  function saveSyncCfg() {
+  function saveStoredJson(key, value) {
     try {
-      localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch (err) {
-      console.warn("保存同步设置失败");
+      console.warn("保存本地配置失败：" + key, err);
     }
   }
 
-  /** 把界面上的同步码 / 地址 / 自动同步写回配置 */
-  function readSyncInputs() {
-    if (!syncCfg) return;
-    syncCfg.code = el.syncCode.value.trim();
-    syncCfg.baseUrl = el.syncBase.value.trim();
-    syncCfg.auto = el.syncAuto.checked;
-    saveSyncCfg();
-    return syncCfg;
+  function loadSupaCfg() {
+    const o = loadStoredJson(SUPA_CFG_KEY, {});
+    return {
+      url: typeof o.url === "string" ? o.url : "",
+      anonKey: typeof o.anonKey === "string" ? o.anonKey : "",
+      auto: o.auto !== false,
+    };
   }
 
-  function syncConfigError() {
-    if (!syncCfg.baseUrl) return "还没填 Worker 地址";
-    if (!syncCfg.code) return "还没填同步码";
-    if (syncCfg.code.length < SYNC_CODE_MIN) {
+  function saveSupaCfg() {
+    saveStoredJson(SUPA_CFG_KEY, supaCfg);
+  }
+
+  function supaConfigured() {
+    return !!(supaCfg && supaCfg.url && supaCfg.anonKey);
+  }
+
+  function loadSupaSession() {
+    const o = loadStoredJson(SUPA_SESSION_KEY, null);
+    if (!o || typeof o.accessToken !== "string" || !o.accessToken) return null;
+    return {
+      accessToken: o.accessToken,
+      refreshToken: typeof o.refreshToken === "string" ? o.refreshToken : "",
+      expiresAt: Number.isFinite(o.expiresAt) ? o.expiresAt : 0,
+      userId: typeof o.userId === "string" ? o.userId : "",
+      email: typeof o.email === "string" ? o.email : "",
+    };
+  }
+
+  function loadSupaMeta() {
+    const o = loadStoredJson(SUPA_META_KEY, {});
+    return {
+      userId: typeof o.userId === "string" ? o.userId : "",
+      baseRev: Number.isFinite(o.baseRev) ? o.baseRev : 0,
+      syncedHash: typeof o.syncedHash === "string" ? o.syncedHash : "",
+      lastSyncAt: Number.isFinite(o.lastSyncAt) ? o.lastSyncAt : 0,
+    };
+  }
+
+  function saveSupaMeta() {
+    saveStoredJson(SUPA_META_KEY, supaMeta);
+  }
+
+  /** 稳定的 JSON 序列化：对象键排序，避免键顺序不同被误判为「有改动」 */
+  function canonical(value) {
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonical).join(",") + "]";
+    }
+    if (value && typeof value === "object") {
       return (
-        "口令错误：同步码至少 " +
-        SYNC_CODE_MIN +
-        " 位，现在只有 " +
-        syncCfg.code.length +
-        " 位"
+        "{" +
+        Object.keys(value)
+          .sort()
+          .map(function (k) {
+            return JSON.stringify(k) + ":" + canonical(value[k]);
+          })
+          .join(",") +
+        "}"
       );
     }
-    return null;
+    return JSON.stringify(value);
   }
 
-  function syncEndpoint(code) {
-    let base = String(syncCfg.baseUrl || "").trim().replace(/\/+$/, "");
-    if (!base) return null;
-    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
-    return base + "/sync/" + encodeURIComponent(code);
+  function hashState(data) {
+    const text = canonical(data);
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) {
+      h = (h * 33 + text.charCodeAt(i)) | 0;
+    }
+    return (h >>> 0).toString(36) + ":" + text.length;
   }
 
-  /** 上传用的快照：只带进度，不带同步码 */
+  /** 上传 / 比对用的整份快照；示例打卡也记一份，跨设备才能一致 */
   function snapshot() {
-    return { v: 2, courses: state.courses, activity: state.activity };
+    return {
+      v: 2,
+      courses: state.courses,
+      activity: state.activity,
+      demoActivity: state.demoActivity || {},
+    };
+  }
+
+  function hasLocalData() {
+    return (
+      state.courses.length > 0 ||
+      Object.keys(state.activity).length > 0 ||
+      Object.keys(state.demoActivity || {}).length > 0
+    );
+  }
+
+  function localDirty() {
+    return hashState(snapshot()) !== supaMeta.syncedHash;
+  }
+
+  function normalizeSupaUrl(raw) {
+    let url = String(raw == null ? "" : raw).trim().replace(/\/+$/, "");
+    if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+    return url;
+  }
+
+  function supaUrl(path) {
+    return String(supaCfg.url || "").replace(/\/+$/, "") + path;
+  }
+
+  function isOnline() {
+    return typeof navigator === "undefined" || navigator.onLine !== false;
+  }
+
+  function isNetworkError(err) {
+    return /Failed to fetch|NetworkError|Load failed|Network request failed|network/i.test(
+      String((err && err.message) || err)
+    );
+  }
+
+  function fetchWithTimeout(url, options) {
+    const controller = new AbortController();
+    const timer = setTimeout(function () {
+      controller.abort();
+    }, SUPA_TIMEOUT);
+    return fetch(url, Object.assign({}, options, { signal: controller.signal })).then(
+      function (res) {
+        clearTimeout(timer);
+        return res;
+      },
+      function (err) {
+        clearTimeout(timer);
+        throw err;
+      }
+    );
+  }
+
+  async function readErrorBody(res) {
+    try {
+      return await res.json();
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function authErrorText(status, detail) {
+    const s = String(detail || "");
+    if (/invalid login credentials/i.test(s)) return "邮箱或密码不对";
+    if (/email not confirmed/i.test(s)) {
+      return "邮箱还没验证：请在 Supabase 控制台确认这个用户，或关闭邮箱验证";
+    }
+    if (/invalid refresh token|refresh token.*(expired|not found)/i.test(s)) {
+      return "登录已过期，请重新登录";
+    }
+    if (status === 429) return "尝试太频繁，等几分钟再登录";
+    if (status === 404) return "接口地址不对：检查 Supabase 项目 URL";
+    return "登录失败：" + (s || "HTTP " + status);
+  }
+
+  async function supaAuthRequest(path, body) {
+    const res = await fetchWithTimeout(supaUrl(path), {
+      method: "POST",
+      headers: {
+        apikey: supaCfg.anonKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) {
+      const info = await readErrorBody(res);
+      const err = new Error(
+        authErrorText(
+          res.status,
+          info && (info.msg || info.error_description || info.error || info.message)
+        )
+      );
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  function sessionFromAuth(body) {
+    if (!body || typeof body.access_token !== "string" || !body.user) {
+      throw new Error("登录响应不完整，没有拿到 token");
+    }
+    return {
+      accessToken: body.access_token,
+      refreshToken: typeof body.refresh_token === "string" ? body.refresh_token : "",
+      expiresAt: Date.now() + (Number(body.expires_in) || 3600) * 1000,
+      userId: String(body.user.id || ""),
+      email: String(body.user.email || ""),
+    };
+  }
+
+  async function refreshSession() {
+    if (!supaSession || !supaSession.refreshToken) {
+      throw new Error("没有可用的 refresh token，请重新登录");
+    }
+    if (supaRefreshPromise) return supaRefreshPromise;
+    supaRefreshPromise = supaAuthRequest(
+      "/auth/v1/token?grant_type=refresh_token",
+      { refresh_token: supaSession.refreshToken }
+    ).then(function (body) {
+      supaSession = sessionFromAuth(body);
+      saveStoredJson(SUPA_SESSION_KEY, supaSession);
+      supaRefreshPromise = null;
+      return supaSession;
+    });
+    supaRefreshPromise.catch(function () {
+      supaRefreshPromise = null;
+    });
+    return supaRefreshPromise;
+  }
+
+  async function ensureSession() {
+    if (!supaSession) throw new Error("未登录");
+    if (supaSession.expiresAt && Date.now() > supaSession.expiresAt - 120000) {
+      return refreshSession();
+    }
+    return supaSession;
+  }
+
+  function authHeaders() {
+    return {
+      apikey: supaCfg.anonKey,
+      Authorization: "Bearer " + (supaSession ? supaSession.accessToken : ""),
+      Accept: "application/json",
+    };
+  }
+
+  /** PostgREST 请求；401 时续期一次再重放 */
+  async function restRequest(path, options) {
+    await ensureSession();
+    const opts = Object.assign({}, options);
+    opts.headers = Object.assign({}, (options && options.headers) || {}, authHeaders());
+    let res = await fetchWithTimeout(supaUrl(path), opts);
+    if (res.status === 401 && supaSession && supaSession.refreshToken) {
+      await refreshSession();
+      opts.headers = Object.assign({}, (options && options.headers) || {}, authHeaders());
+      res = await fetchWithTimeout(supaUrl(path), opts);
+    }
+    return res;
+  }
+
+  async function restErrorText(res) {
+    const body = await readErrorBody(res);
+    if (body && body.code === "42P01") {
+      return "云端还没有建表：请先在 Supabase SQL Editor 执行 supabase/schema.sql";
+    }
+    if (body && body.code === "42501") {
+      return "没有权限：请确认 schema.sql 里的 RLS 策略已经执行";
+    }
+    const detail =
+      (body && (body.msg || body.message || body.details || body.hint)) || "";
+    if (res.status === 401) return "登录已失效，请重新登录";
+    if (res.status === 403) return "没有权限读写自己的数据（检查 RLS 策略）";
+    return detail || "HTTP " + res.status;
+  }
+
+  async function fetchRemote() {
+    const session = await ensureSession();
+    const res = await restRequest(
+      "/rest/v1/study_state?user_id=eq." +
+        encodeURIComponent(session.userId) +
+        "&select=data,rev,updated_at",
+      { method: "GET" }
+    );
+    if (!res.ok) throw new Error(await restErrorText(res));
+    const rows = await res.json();
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const row = rows[0];
+    return {
+      data: row.data && typeof row.data === "object" ? row.data : {},
+      rev: Number.isFinite(Number(row.rev)) ? Number(row.rev) : 0,
+      updatedAt: row.updated_at || null,
+    };
+  }
+
+  function uploadTooBig() {
+    const size = JSON.stringify(snapshot()).length;
+    if (size > 900000) {
+      setSyncStatus("error", "数据接近 1 MB 上限，本次没有上传；建议先导出备份并清理旧记录");
+      return true;
+    }
+    return false;
+  }
+
+  async function insertRemote() {
+    const session = await ensureSession();
+    const res = await restRequest("/rest/v1/study_state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify({ user_id: session.userId, data: snapshot(), rev: 1 }),
+    });
+    if (res.status === 409) {
+      return { conflict: true, remote: await fetchRemote() };
+    }
+    if (!res.ok) throw new Error(await restErrorText(res));
+    const rows = await res.json();
+    return { row: rows && rows[0] ? rows[0] : null };
+  }
+
+  async function updateRemote(baseRev) {
+    const session = await ensureSession();
+    const res = await restRequest(
+      "/rest/v1/study_state?user_id=eq." +
+        encodeURIComponent(session.userId) +
+        "&rev=eq." +
+        baseRev,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+        body: JSON.stringify({ data: snapshot(), rev: baseRev + 1 }),
+      }
+    );
+    if (!res.ok) throw new Error(await restErrorText(res));
+    const rows = await res.json();
+    return rows && rows[0] ? rows[0] : null;
+  }
+
+  function markSynced(row) {
+    supaMeta.userId = supaSession.userId;
+    supaMeta.baseRev = Number(row && row.rev) || Math.max(1, supaMeta.baseRev + 1);
+    supaMeta.syncedHash = hashState(snapshot());
+    supaMeta.lastSyncAt = Date.now();
+    saveSupaMeta();
+  }
+
+  /** 云端覆盖本地：只在用户明确选择后调用 */
+  function applyRemote(remote, message) {
+    const clean = sanitize(remote && remote.data);
+    if (!clean) {
+      setSyncStatus("error", "云端数据格式不对，没有应用");
+      return false;
+    }
+    suppressAutoSync = true;
+    state = clean;
+    saveState();
+    suppressAutoSync = false;
+    supaMeta.baseRev = remote.rev || 0;
+    supaMeta.userId = supaSession ? supaSession.userId : supaMeta.userId;
+    supaMeta.syncedHash = hashState(snapshot());
+    supaMeta.lastSyncAt = Date.now();
+    saveSupaMeta();
+    seenIds.clear();
+    openIds.clear();
+    renderAll();
+    setSyncStatus("ok", message || "已拉取云端进度 · " + timeLabel(supaMeta.lastSyncAt));
+    return true;
+  }
+
+  function adoptRemote(remote, message) {
+    supaMeta.baseRev = remote.rev || 0;
+    supaMeta.userId = supaSession ? supaSession.userId : supaMeta.userId;
+    supaMeta.syncedHash = hashState(snapshot());
+    supaMeta.lastSyncAt = Date.now();
+    saveSupaMeta();
+    setSyncStatus("ok", message || "本机与云端一致 · " + timeLabel(supaMeta.lastSyncAt));
+  }
+
+  function showConflict(remote, reason) {
+    pendingConflict = {
+      remote: remote && typeof remote === "object" ? remote : null,
+      reason: reason || "云端有更新",
+    };
+    const stamp =
+      remote && remote.updatedAt
+        ? timeLabel(new Date(remote.updatedAt).getTime())
+        : "未知";
+    el.conflictNote.textContent =
+      pendingConflict.reason +
+      "。云端版本：" +
+      stamp +
+      "（rev " +
+      (remote && remote.rev != null ? remote.rev : "?") +
+      "）；本机现在 " +
+      state.courses.length +
+      " 门课程。请选择保留哪一份，不会自动覆盖。";
+    el.conflictTakeRemote.disabled = !(remote && remote.data);
+    el.syncConflict.hidden = false;
+    setSyncStatus("conflict", "冲突：云端与本机都有改动，等你选择");
+  }
+
+  function closeConflict() {
+    el.syncConflict.hidden = true;
+  }
+
+  function handleSyncError(err, prefix) {
+    if (err && err.name === "AbortError") {
+      setSyncStatus("error", "同步超时：15 秒内 Supabase 没有响应，记录仍在本机");
+    } else if (isNetworkError(err) || !isOnline()) {
+      setSyncStatus("error", "离线或连不上 Supabase：记录已保存在本机，联网后自动同步");
+    } else {
+      setSyncStatus("error", prefix + "：" + String((err && err.message) || err));
+    }
+  }
+
+  /** 真正写云端；调用方负责 supaBusy 与状态提示 */
+  async function uploadSnapshot(baseRev) {
+    let result;
+    if (!baseRev) {
+      result = await insertRemote();
+    } else {
+      const row = await updateRemote(baseRev);
+      result = row ? { row: row } : { conflict: true, remote: await fetchRemote() };
+    }
+
+    if (result.conflict) {
+      let remote = result.remote;
+      if (!remote) {
+        // 条件更新 0 行、云端也读不到：那一行被删了，按首次上传重建
+        supaMeta.baseRev = 0;
+        supaMeta.syncedHash = "";
+        saveSupaMeta();
+        result = await insertRemote();
+        remote = result.conflict ? result.remote : null;
+        if (result.row) {
+          markSynced(result.row);
+          setSyncStatus("ok", "已上传 · " + timeLabel(supaMeta.lastSyncAt));
+          return true;
+        }
+      }
+      if (remote) {
+        showConflict(remote, "上传被拒绝：云端已被别的设备改过");
+      } else {
+        setSyncStatus("conflict", "上传冲突，但读不到云端数据；请稍后重试");
+      }
+      return false;
+    }
+    if (!result.row) throw new Error("云端没有返回写入结果");
+
+    markSynced(result.row);
+    pendingConflict = null;
+    setSyncStatus("ok", "已上传 · " + timeLabel(supaMeta.lastSyncAt));
+    return true;
+  }
+
+  async function pushLocal(baseRev, notify) {
+    if (!supaSession || !supaConfigured()) {
+      toast("先保存 Supabase 配置并登录");
+      return false;
+    }
+    if (!isOnline()) {
+      supaReady = true;
+      setSyncStatus("error", "离线：改动已保存在本机，联网后会自动上传");
+      if (notify) toast("当前离线，先记在本机");
+      return false;
+    }
+    if (supaBusy) return false;
+    if (uploadTooBig()) return false;
+
+    supaBusy = true;
+    setSyncStatus("busy", "正在上传…");
+    try {
+      const ok = await uploadSnapshot(baseRev);
+      if (ok && notify) toast("已同步到云端");
+      return ok;
+    } catch (err) {
+      handleSyncError(err, "上传失败");
+      return false;
+    } finally {
+      supaBusy = false;
+    }
+  }
+
+  /** 登录后 / 恢复登录后的首次核对 */
+  async function syncAfterLogin() {
+    if (!supaSession || !supaConfigured()) return;
+    if (supaBusy) return;
+    if (!isOnline()) {
+      supaReady = true;
+      setSyncStatus("error", "离线：已使用本机缓存，联网后自动同步");
+      return;
+    }
+
+    supaBusy = true;
+    supaReady = false;
+    setSyncStatus("busy", "正在检查云端…");
+    try {
+      if (supaMeta.userId !== supaSession.userId) {
+        supaMeta = { userId: supaSession.userId, baseRev: 0, syncedHash: "", lastSyncAt: 0 };
+        saveSupaMeta();
+      }
+
+      const remote = await fetchRemote();
+      if (!remote) {
+        if (!hasLocalData()) {
+          supaMeta.syncedHash = hashState(snapshot());
+          saveSupaMeta();
+          setSyncStatus("ok", "云端暂无数据；记下一笔后会自动上传");
+        } else {
+          await uploadSnapshot(0);
+        }
+        supaReady = true;
+        return;
+      }
+
+      const localHash = hashState(snapshot());
+      if (supaMeta.baseRev === 0 || !supaMeta.syncedHash) {
+        // 这台设备还没参与过云同步：本机空就用云端，否则必须让用户选
+        if (!hasLocalData()) {
+          applyRemote(remote, "已拉取云端进度");
+        } else if (localHash === hashState(remote.data)) {
+          adoptRemote(remote, "本机与云端一致");
+        } else {
+          showConflict(remote, "首次登录：本机与云端都有数据");
+        }
+      } else if (remote.rev === supaMeta.baseRev) {
+        if (localHash !== supaMeta.syncedHash) {
+          await uploadSnapshot(supaMeta.baseRev);
+        } else {
+          setSyncStatus("ok", "已是最新 · " + timeLabel(supaMeta.lastSyncAt));
+        }
+      } else if (remote.rev > supaMeta.baseRev) {
+        if (localHash === supaMeta.syncedHash) {
+          applyRemote(remote, "已拉取云端更新");
+        } else {
+          showConflict(remote, "云端有更新的版本，本机也有未同步的改动");
+        }
+      } else {
+        showConflict(remote, "云端版本比本机记录的还旧（可能被重置过）");
+      }
+      supaReady = true;
+    } catch (err) {
+      if (err && (err.status === 400 || err.status === 401)) {
+        await logout(false);
+        setAuthStatus("error", "登录已过期，请重新登录");
+      } else {
+        handleSyncError(err, "检查云端失败");
+      }
+      supaReady = true;
+    } finally {
+      supaBusy = false;
+    }
+  }
+
+  async function manualPush() {
+    if (!supaSession) {
+      toast("先登录才能上传");
+      return;
+    }
+    if (supaBusy) {
+      toast("上一个同步请求还没结束，稍等一下");
+      return;
+    }
+    if (!isOnline()) {
+      setSyncStatus("error", "离线：记录已在本机，联网后再上传");
+      toast("当前离线，先记在本机");
+      return;
+    }
+
+    supaBusy = true;
+    setSyncStatus("busy", "正在检查云端…");
+    try {
+      const remote = await fetchRemote();
+      if (remote && remote.rev !== supaMeta.baseRev) {
+        showConflict(remote, "上传前发现云端已更新");
+        return;
+      }
+      if (!remote && supaMeta.baseRev > 0) {
+        // 云端那行被删了，退回首次上传
+        supaMeta.baseRev = 0;
+        supaMeta.syncedHash = "";
+        saveSupaMeta();
+      }
+      if (remote && !localDirty()) {
+        setSyncStatus("ok", "已是最新 · " + timeLabel(supaMeta.lastSyncAt));
+        toast("云端已经是最新");
+        return;
+      }
+      if (!remote && !hasLocalData()) {
+        setSyncStatus("ok", "云端暂无数据；记下一笔后会自动上传");
+        toast("本机还没有可上传的记录");
+        return;
+      }
+      if (uploadTooBig()) return;
+      const ok = await uploadSnapshot(supaMeta.baseRev);
+      if (ok) toast("已同步到云端");
+    } catch (err) {
+      handleSyncError(err, "上传失败");
+    } finally {
+      supaBusy = false;
+    }
+  }
+
+  async function manualPull() {
+    if (!supaSession) {
+      toast("先登录才能拉取");
+      return;
+    }
+    if (supaBusy) {
+      toast("上一个同步请求还没结束，稍等一下");
+      return;
+    }
+    if (!isOnline()) {
+      setSyncStatus("error", "离线：本机记录照常可用，联网后再拉取");
+      toast("当前离线，拉取失败");
+      return;
+    }
+
+    supaBusy = true;
+    setSyncStatus("busy", "正在拉取云端…");
+    try {
+      const remote = await fetchRemote();
+      if (!remote) {
+        setSyncStatus("error", "云端还没有数据：先在这台设备上传一次");
+        toast("云端还没有数据");
+        return;
+      }
+      const clean = hashState(snapshot()) === supaMeta.syncedHash;
+      if (remote.rev === supaMeta.baseRev && clean) {
+        setSyncStatus("ok", "已是最新 · " + timeLabel(supaMeta.lastSyncAt));
+        toast("已经是最新，不需要覆盖");
+        return;
+      }
+      if (!clean && hasLocalData()) {
+        showConflict(remote, "手动拉取：本机有未同步的改动");
+        return;
+      }
+      if (applyRemote(remote, "已用云端进度覆盖本机")) {
+        toast("已用云端进度覆盖本机");
+      }
+    } catch (err) {
+      handleSyncError(err, "拉取失败");
+    } finally {
+      supaBusy = false;
+    }
+  }
+
+  function setAuthStatus(kind, text) {
+    el.supaAuthStatus.textContent = text;
+    el.supaAuthStatus.dataset.state = kind;
+  }
+
+  function renderSupaPanel() {
+    const configured = supaConfigured();
+    const loggedIn = !!(supaSession && configured);
+    el.supaConfigBlock.hidden = loggedIn;
+    el.supaLoginBlock.hidden = !configured || loggedIn;
+    el.supaSessionBlock.hidden = !loggedIn;
+    el.supaCfgForget.hidden = !configured || loggedIn;
+
+    if (!loggedIn) {
+      el.supaUrl.value = supaCfg.url;
+      el.supaKey.value = supaCfg.anonKey;
+      setAuthStatus("idle", configured ? "已配置，请登录" : "尚未配置 Supabase");
+      return;
+    }
+    el.supaWho.textContent = supaSession.email || supaSession.userId;
+    el.supaAuto.checked = !!supaCfg.auto;
+  }
+
+  async function loginWithPassword(email, password) {
+    if (!supaConfigured()) {
+      setAuthStatus("error", "先保存 Supabase 地址与 anon key");
+      toast("先保存连接配置");
+      return;
+    }
+    if (!isOnline()) {
+      setAuthStatus("error", "当前离线，登录需要联网");
+      toast("当前离线，登录失败");
+      return;
+    }
+    el.supaLoginBtn.disabled = true;
+    setAuthStatus("busy", "正在登录…");
+    try {
+      const body = await supaAuthRequest("/auth/v1/token?grant_type=password", {
+        email: email,
+        password: password,
+      });
+      supaSession = sessionFromAuth(body);
+      saveStoredJson(SUPA_SESSION_KEY, supaSession);
+      el.supaPassword.value = "";
+      pendingConflict = null;
+      renderSupaPanel();
+      setSyncStatus("busy", "已登录，正在检查云端…");
+      await syncAfterLogin();
+      toast("登录成功");
+    } catch (err) {
+      setAuthStatus("error", String((err && err.message) || err));
+      toast("登录失败");
+    } finally {
+      el.supaLoginBtn.disabled = false;
+    }
+  }
+
+  async function logout(showToast) {
+    const old = supaSession;
+    clearTimeout(autoSyncTimer);
+    supaSession = null;
+    supaReady = false;
+    pendingConflict = null;
+    try {
+      localStorage.removeItem(SUPA_SESSION_KEY);
+    } catch (err) {
+      console.warn("清除登录态失败", err);
+    }
+    if (old && supaConfigured() && isOnline()) {
+      // 尽力注销云端会话；失败不影响本地退出
+      fetchWithTimeout(supaUrl("/auth/v1/logout"), {
+        method: "POST",
+        headers: {
+          apikey: supaCfg.anonKey,
+          Authorization: "Bearer " + old.accessToken,
+        },
+      }).catch(function () {});
+    }
+    renderSupaPanel();
+    setAuthStatus("idle", "已退出登录，本机记录仍在");
+    if (showToast) toast("已退出登录，本机数据没有删除");
+  }
+
+  async function saveSupaConfig() {
+    const url = normalizeSupaUrl(el.supaUrl.value);
+    const key = String(el.supaKey.value || "").trim();
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch (err) {
+      parsed = null;
+    }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      toast("Supabase 地址格式不对，应形如 https://xxxx.supabase.co");
+      el.supaUrl.focus();
+      return;
+    }
+    if (
+      parsed.protocol === "http:" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1"
+    ) {
+      toast("线上站点请使用 https:// 的 Supabase 地址");
+      return;
+    }
+    if (!key || /\s/.test(key) || key.length < 20) {
+      toast("anon key 看起来不完整，请从 Supabase 控制台整段复制");
+      el.supaKey.focus();
+      return;
+    }
+
+    const changed = url !== supaCfg.url || key !== supaCfg.anonKey;
+    if (changed && supaSession) {
+      await logout(false);
+      supaMeta = { userId: "", baseRev: 0, syncedHash: "", lastSyncAt: 0 };
+      saveSupaMeta();
+    }
+    supaCfg = { url: url, anonKey: key, auto: supaCfg.auto };
+    saveSupaCfg();
+    el.supaUrl.value = url;
+    renderSupaPanel();
+    setAuthStatus("idle", "配置已保存，请登录");
+    toast("连接配置已保存，请登录");
+  }
+
+  async function forgetSupaConfig() {
+    if (
+      !confirm(
+        "清除本机的 Supabase 连接配置与登录态？云端数据和本机进度都不会删除。"
+      )
+    ) {
+      return;
+    }
+    await logout(false);
+    supaCfg = { url: "", anonKey: "", auto: true };
+    saveSupaCfg();
+    supaMeta = { userId: "", baseRev: 0, syncedHash: "", lastSyncAt: 0 };
+    saveSupaMeta();
+    el.supaUrl.value = "";
+    el.supaKey.value = "";
+    renderSupaPanel();
+    toast("已清除本机连接配置，进度仍在本机");
+  }
+
+  async function restoreSession() {
+    if (!supaSession || !supaConfigured()) return;
+    if (supaBusy) return;
+    if (!isOnline()) {
+      supaReady = true;
+      setSyncStatus("error", "离线：已使用本机缓存；联网后自动续期并同步");
+      return;
+    }
+    try {
+      if (supaSession.expiresAt && Date.now() > supaSession.expiresAt - 120000) {
+        await refreshSession();
+      }
+      await syncAfterLogin();
+    } catch (err) {
+      if (err && (err.status === 400 || err.status === 401)) {
+        await logout(false);
+        setAuthStatus("error", "登录已过期，请重新登录");
+      } else {
+        handleSyncError(err, "恢复登录失败");
+        supaReady = true;
+      }
+    }
+  }
+
+  function scheduleAutoSync() {
+    if (!supaCfg || suppressAutoSync || !supaSession || !supaCfg.auto || !supaReady) {
+      return;
+    }
+    if (pendingConflict) return; // 冲突没解决前不再自动上传
+    if (!isOnline()) {
+      setSyncStatus("error", "离线：改动已保存在本机，联网后自动同步");
+      return;
+    }
+    clearTimeout(autoSyncTimer);
+    autoSyncTimer = setTimeout(function () {
+      if (
+        !supaSession ||
+        !supaCfg.auto ||
+        supaBusy ||
+        pendingConflict ||
+        !supaReady
+      ) {
+        return;
+      }
+      pushLocal(supaMeta.baseRev, false);
+    }, SYNC_DEBOUNCE);
   }
 
   function timeLabel(ms) {
@@ -1460,279 +2247,51 @@
   }
 
   function setSyncStatus(kind, text) {
-    el.syncStatus.textContent = text;
-    el.syncStatus.dataset.state = kind;
+    el.supaSyncStatus.textContent = text;
+    el.supaSyncStatus.dataset.state = kind;
   }
 
-  function withTimeout(promise, ms) {
-    return new Promise(function (resolve, reject) {
-      const timer = setTimeout(function () {
-        const err = new Error("timeout");
-        err.name = "AbortError";
-        reject(err);
-      }, ms);
-      promise.then(
-        function (value) {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        function (err) {
-          clearTimeout(timer);
-          reject(err);
-        }
-      );
-    });
-  }
+  function initSupa() {
+    supaCfg = loadSupaCfg();
+    supaSession = loadSupaSession();
+    supaMeta = loadSupaMeta();
+    renderSupaPanel();
 
-  /** 用云端数据覆盖本地（保留同步码，不触发自动上传回声） */
-  function applyRemote(data, updatedAt) {
-    const clean = sanitize(data);
-    if (!clean) return false;
-    suppressAutoSync = true;
-    state = clean;
-    saveState();
-    suppressAutoSync = false;
-    syncCfg.updatedAt = typeof updatedAt === "number" ? updatedAt : null;
-    syncCfg.lastSyncAt = Date.now();
-    saveSyncCfg();
-    seenIds.clear();
-    openIds.clear();
-    renderAll();
-    return true;
-  }
-
-  function showConflict(server, reason) {
-    const s = server && typeof server === "object" ? server : {};
-    pendingConflict = {
-      data: s.data && typeof s.data === "object" ? s.data : null,
-      updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : null,
-      reason: reason || "云端有更新",
-    };
-
-    el.conflictNote.textContent =
-      pendingConflict.reason +
-      "。云端版本：" +
-      (pendingConflict.updatedAt ? timeLabel(pendingConflict.updatedAt) : "（无记录）") +
-      "；本机现有 " +
-      state.courses.length +
-      " 门课程。请选择保留哪一份，不会自动覆盖。";
-    el.conflictTakeRemote.disabled = !pendingConflict.data;
-    el.syncConflict.hidden = false;
-    setSyncStatus("conflict", "冲突：云端已被别处改过，等你选择");
-  }
-
-  function closeConflict() {
-    el.syncConflict.hidden = true;
-    pendingConflict = null;
-  }
-
-  /** 上传：forceBase 用于冲突时「用本地覆盖云端」 */
-  function syncUpload(forceBase) {
-    if (syncBusy) {
-      toast("上一个同步请求还没结束，稍等一下");
-      return;
-    }
-    readSyncInputs();
-    const bad = syncConfigError();
-    if (bad) {
-      setSyncStatus("error", bad);
-      toast(bad);
-      return;
-    }
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setSyncStatus("error", "离线：网络不可用，进度仍保存在本机");
-      toast("当前离线，先记在本地，联网后再上传");
-      return;
-    }
-    const endpoint = syncEndpoint(syncCfg.code);
-    if (!endpoint) {
-      setSyncStatus("error", "Worker 地址无效");
-      return;
-    }
-
-    // baseUpdatedAt 永远是「上次从云端拿到的版本号」；首次上传为 null
-    const base = forceBase === undefined ? syncCfg.updatedAt : forceBase;
-    let payload;
-    try {
-      payload = JSON.stringify({ data: snapshot(), baseUpdatedAt: base });
-    } catch (err) {
-      setSyncStatus("error", "本地数据无法序列化，上传失败");
-      return;
-    }
-
-    syncBusy = true;
-    setSyncStatus("busy", "正在上传…");
-
-    withTimeout(
-      fetch(endpoint, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      }),
-      SYNC_TIMEOUT
-    )
-      .then(function (res) {
-        if (res.status === 200) {
-          return res.json().then(function (body) {
-            if (body && typeof body.updatedAt === "number") {
-              syncCfg.updatedAt = body.updatedAt;
-            }
-            syncCfg.lastSyncAt = Date.now();
-            saveSyncCfg();
-            setSyncStatus("ok", "上次同步：" + timeLabel(syncCfg.lastSyncAt) + " · 已上传");
-            toast("已上传到云端");
-          });
-        }
-        if (res.status === 409) {
-          return res.json().then(function (body) {
-            showConflict(body, "上传被拒绝：云端已被别的设备改过");
-          });
-        }
-        if (res.status === 400) {
-          return res.json().then(function (body) {
-            const msg = "口令错误：" + ((body && body.message) || "同步码不合法");
-            setSyncStatus("error", msg);
-            toast("同步码不合法：至少 16 位，且不能含空格");
-          });
-        }
-        if (res.status === 404) {
-          setSyncStatus("error", "地址不对：Worker 没有这个接口，检查 Worker 地址");
-          return;
-        }
-        if (res.status === 413) {
-          setSyncStatus("error", "数据太大（超过 1 MB），上传失败");
-          return;
-        }
-        throw new Error("HTTP " + res.status);
-      })
-      .catch(function (err) {
-        if (err && err.name === "AbortError") {
-          setSyncStatus("error", "同步超时：Worker 15 秒内没有响应");
-        } else if (err && /^HTTP /.test(String(err.message || ""))) {
-          setSyncStatus("error", "同步失败：" + err.message + "，进度仍在本机");
-        } else {
-          setSyncStatus("error", "离线或 Worker 地址不可达：上传失败");
-        }
-        toast("上传失败，进度仍保存在本机");
-      })
-      .then(function () {
-        syncBusy = false;
-      });
-  }
-
-  /** 拉取：云端版本更新时先确认，再覆盖本地 */
-  function syncPull() {
-    if (syncBusy) {
-      toast("上一个同步请求还没结束，稍等一下");
-      return;
-    }
-    readSyncInputs();
-    const bad = syncConfigError();
-    if (bad) {
-      setSyncStatus("error", bad);
-      toast(bad);
-      return;
-    }
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setSyncStatus("error", "离线：网络不可用，本机记录照常可用");
-      toast("当前离线，拉取失败");
-      return;
-    }
-    const endpoint = syncEndpoint(syncCfg.code);
-    if (!endpoint) {
-      setSyncStatus("error", "Worker 地址无效");
-      return;
-    }
-
-    syncBusy = true;
-    setSyncStatus("busy", "正在拉取…");
-
-    withTimeout(
-      fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } }),
-      SYNC_TIMEOUT
-    )
-      .then(function (res) {
-        if (res.status === 200) {
-          return res.json().then(function (body) {
-            if (!body || !body.data) {
-              setSyncStatus("error", "云端返回的数据不完整，没有应用");
-              return;
-            }
-            if (
-              typeof body.updatedAt === "number" &&
-              body.updatedAt === syncCfg.updatedAt
-            ) {
-              setSyncStatus("ok", "云端与本机版本一致：" + timeLabel(body.updatedAt));
-              toast("已经是最新，不需要覆盖");
-              return;
-            }
-            if (
-              state.courses.length > 0 &&
-              !confirm(
-                "用云端进度覆盖本机？\n本机现有 " +
-                  state.courses.length +
-                  " 门课程，覆盖后无法撤销，建议先导出备份。"
-              )
-            ) {
-              setSyncStatus("idle", "已取消拉取，本机数据没有变化");
-              return;
-            }
-            if (applyRemote(body.data, body.updatedAt)) {
-              setSyncStatus("ok", "上次同步：" + timeLabel(syncCfg.lastSyncAt) + " · 已拉取");
-              toast("已用云端进度覆盖本机");
-            } else {
-              setSyncStatus("error", "云端数据格式不对，没有应用");
-            }
-          });
-        }
-        if (res.status === 404) {
-          setSyncStatus("error", "口令错误或云端无数据：这个同步码还没有记录");
-          toast("检查同步码是否输错，或先在这台设备上传一次");
-          return;
-        }
-        if (res.status === 400) {
-          return res.json().then(function (body) {
-            setSyncStatus("error", "口令错误：" + ((body && body.message) || "同步码不合法"));
-          });
-        }
-        throw new Error("HTTP " + res.status);
-      })
-      .catch(function (err) {
-        if (err && err.name === "AbortError") {
-          setSyncStatus("error", "同步超时：Worker 15 秒内没有响应");
-        } else if (err && /^HTTP /.test(String(err.message || ""))) {
-          setSyncStatus("error", "拉取失败：" + err.message + "，本机数据未变");
-        } else {
-          setSyncStatus("error", "离线或 Worker 地址不可达：拉取失败");
-        }
-        toast("拉取失败，本机数据未变");
-      })
-      .then(function () {
-        syncBusy = false;
-      });
-  }
-
-  function scheduleAutoSync() {
-    if (suppressAutoSync || !syncCfg || !syncCfg.auto) return;
-    if (pendingConflict) return; // 冲突没解决前不再自动上传
-    if (!syncCfg.code || syncCfg.code.length < SYNC_CODE_MIN) return;
-    if (!syncCfg.baseUrl) return;
-    clearTimeout(autoSyncTimer);
-    autoSyncTimer = setTimeout(function () {
-      syncUpload();
-    }, 2000);
-  }
-
-  function initSyncPanel() {
-    el.syncCode.value = syncCfg.code;
-    el.syncBase.value = syncCfg.baseUrl;
-    el.syncAuto.checked = !!syncCfg.auto;
-    if (syncCfg.lastSyncAt) {
-      setSyncStatus("ok", "上次同步：" + timeLabel(syncCfg.lastSyncAt));
-    } else {
-      setSyncStatus("idle", "尚未同步");
+    if (supaSession && supaConfigured()) {
+      el.supaWho.textContent = supaSession.email || supaSession.userId;
+      if (supaMeta.lastSyncAt) {
+        setSyncStatus("ok", "上次同步：" + timeLabel(supaMeta.lastSyncAt));
+      } else {
+        setSyncStatus("busy", "已登录，正在同步…");
+      }
+      restoreSession();
+    } else if (supaSession) {
+      // 配置被清掉但还留着 token：token 已经没用了
+      supaSession = null;
+      try {
+        localStorage.removeItem(SUPA_SESSION_KEY);
+      } catch (err) {}
+      setSyncStatus("idle", "尚未配置");
     }
   }
+
+  window.addEventListener("online", function () {
+    if (!supaSession) return;
+    supaReady = false;
+    setSyncStatus("busy", "网络已恢复，正在同步…");
+    if (supaBusy) {
+      setTimeout(function () {
+        if (!supaBusy) restoreSession();
+      }, 1000);
+      return;
+    }
+    restoreSession();
+  });
+
+  window.addEventListener("offline", function () {
+    if (!supaSession) return;
+    setSyncStatus("error", "离线：记录照常保存在本机，联网后自动同步");
+  });
 
   // ---------- 事件 ----------
 
@@ -1863,65 +2422,79 @@
     }
   });
 
-  // ---------- 云同步事件 ----------
+  // ---------- 云同步事件（Supabase） ----------
 
-  el.syncCodeToggle.addEventListener("click", function () {
-    const shown = el.syncCode.type === "text";
-    el.syncCode.type = shown ? "password" : "text";
-    el.syncCodeToggle.textContent = shown ? "显示" : "隐藏";
-    el.syncCodeToggle.setAttribute("aria-pressed", String(!shown));
+  el.supaKeyToggle.addEventListener("click", function () {
+    const shown = el.supaKey.type === "text";
+    el.supaKey.type = shown ? "password" : "text";
+    el.supaKeyToggle.textContent = shown ? "显示" : "隐藏";
+    el.supaKeyToggle.setAttribute("aria-pressed", String(!shown));
   });
 
-  el.syncCode.addEventListener("change", readSyncInputs);
-  el.syncBase.addEventListener("change", readSyncInputs);
+  el.supaCfgSave.addEventListener("click", saveSupaConfig);
+  el.supaCfgForget.addEventListener("click", forgetSupaConfig);
 
-  el.syncAuto.addEventListener("change", function () {
-    readSyncInputs();
-    toast(syncCfg.auto ? "已开启自动上传，改动后 2 秒内同步" : "已关闭自动上传");
+  el.supaLoginForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    const email = el.supaEmail.value.trim();
+    const password = el.supaPassword.value;
+    if (!email) {
+      setAuthStatus("error", "先填邮箱");
+      el.supaEmail.focus();
+      return;
+    }
+    if (!password) {
+      setAuthStatus("error", "先填密码");
+      el.supaPassword.focus();
+      return;
+    }
+    loginWithPassword(email, password);
   });
 
-  el.syncUploadBtn.addEventListener("click", function () {
-    syncUpload();
+  el.supaAuto.addEventListener("change", function () {
+    supaCfg.auto = el.supaAuto.checked;
+    saveSupaCfg();
+    if (!supaCfg.auto) {
+      clearTimeout(autoSyncTimer);
+      setSyncStatus("idle", "自动同步已关闭；改动只保存在本机");
+      toast("已关闭自动同步");
+    } else {
+      toast("已开启自动同步");
+      if (supaReady) syncAfterLogin();
+    }
   });
 
-  el.syncPullBtn.addEventListener("click", syncPull);
-
-  el.syncForgetBtn.addEventListener("click", function () {
-    if (!confirm("清除本机的同步码和 Worker 地址？云端数据不会被删除。")) return;
-    syncCfg = { code: "", baseUrl: "", auto: false, updatedAt: null, lastSyncAt: 0 };
-    saveSyncCfg();
-    el.syncCode.value = "";
-    el.syncBase.value = "";
-    el.syncAuto.checked = false;
-    setSyncStatus("idle", "尚未同步");
-    toast("已清除本机同步设置");
+  el.supaPushBtn.addEventListener("click", manualPush);
+  el.supaPullBtn.addEventListener("click", manualPull);
+  el.supaLogoutBtn.addEventListener("click", function () {
+    if (!confirm("退出登录？本机进度不会删除，云端数据也不会动。")) return;
+    logout(true);
   });
 
   el.conflictTakeRemote.addEventListener("click", function () {
-    if (!pendingConflict || !pendingConflict.data) return;
-    if (!confirm("用云端数据覆盖本机全部记录？此操作不可撤销。")) return;
-    const ok = applyRemote(pendingConflict.data, pendingConflict.updatedAt);
+    if (!pendingConflict || !pendingConflict.remote) return;
+    const remote = pendingConflict.remote;
     closeConflict();
-    if (ok) {
-      setSyncStatus("ok", "上次同步：" + timeLabel(syncCfg.lastSyncAt) + " · 已用云端覆盖本地");
+    pendingConflict = null;
+    if (applyRemote(remote, "已用云端覆盖本地")) {
       toast("已用云端覆盖本地");
-    } else {
-      setSyncStatus("error", "云端数据格式不对，没有应用");
     }
   });
 
   el.conflictPushLocal.addEventListener("click", function () {
     if (!pendingConflict) return;
-    const base = pendingConflict.updatedAt;
+    const base = pendingConflict.remote ? pendingConflict.remote.rev : supaMeta.baseRev;
     closeConflict();
+    pendingConflict = null;
     toast("正在用本地覆盖云端…");
-    syncUpload(base);
+    pushLocal(base, true);
   });
 
   el.conflictCancel.addEventListener("click", function () {
+    // 保留 pendingConflict：自动上传继续被挡住，直到用户明确选一份
     closeConflict();
-    setSyncStatus("conflict", "冲突未解决：云端与本机各自保留，下次同步还会提示");
-    toast("已暂时搁置冲突");
+    setSyncStatus("conflict", "冲突未解决：云端与本机各自保留，手动同步时会再次提示");
+    toast("已暂时搁置冲突，自动同步暂停");
   });
 
   el.seedBtn.addEventListener("click", function () {
@@ -2087,8 +2660,7 @@
   // ---------- 启动 ----------
 
   el.promptText.textContent = BILI_PROMPT;
-  syncCfg = loadSyncCfg();
-  initSyncPanel();
+  initSupa();
 
   renderAll();
 
