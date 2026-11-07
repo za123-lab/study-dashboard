@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
   <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261108-2">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -135,6 +135,7 @@
           <button type="button" class="btn ghost" id="supaCfgSave">保存连接配置</button>
           <button type="button" class="btn ghost" id="supaCfgForget" hidden>清除配置</button>
         </div>
+        <p class="sync-status mono" id="supaCfgStatus" role="status" aria-live="polite" data-state="idle">尚未保存连接配置</p>
         <p class="sync-hint">URL 与 anon key 只存在这台设备的浏览器里，不会写进仓库。anon key 本来就是给浏览器用的公开密钥，数据安全靠表上的 RLS 策略。</p>
       </div>
 
@@ -254,6 +255,22 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20261108-2"></script>
+  <script>
+    // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
+    setTimeout(function () {
+      if (document.documentElement.getAttribute("data-app-ready") === "1") return;
+      var status = document.getElementById("supaCfgStatus");
+      if (status) {
+        status.textContent = "页面脚本没有加载成功，「保存连接配置」不会生效。请强制刷新（电脑 Ctrl+F5 / 手机清除缓存后重开）。";
+        status.dataset.state = "error";
+      }
+      var toast = document.getElementById("toast");
+      if (toast) {
+        toast.textContent = "页面脚本未加载，请强制刷新后重试";
+        toast.classList.add("show");
+      }
+    }, 2500);
+  </script>
 </body>
 </html>

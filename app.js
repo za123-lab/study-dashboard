@@ -373,6 +373,7 @@
     supaKeyToggle: $("#supaKeyToggle"),
     supaCfgSave: $("#supaCfgSave"),
     supaCfgForget: $("#supaCfgForget"),
+    supaCfgStatus: $("#supaCfgStatus"),
     supaLoginBlock: $("#supaLoginBlock"),
     supaLoginForm: $("#supaLoginForm"),
     supaEmail: $("#supaEmail"),
@@ -2045,6 +2046,17 @@
     el.supaAuthStatus.dataset.state = kind;
   }
 
+  function setCfgStatus(kind, text) {
+    el.supaCfgStatus.textContent = text;
+    el.supaCfgStatus.dataset.state = kind;
+  }
+
+  function failSupaConfig(message, input) {
+    setCfgStatus("error", message);
+    toast(message);
+    if (input) input.focus();
+  }
+
   function renderSupaPanel() {
     const configured = supaConfigured();
     const loggedIn = !!(supaSession && configured);
@@ -2057,6 +2069,11 @@
       el.supaUrl.value = supaCfg.url;
       el.supaKey.value = supaCfg.anonKey;
       setAuthStatus("idle", configured ? "已配置，请登录" : "尚未配置 Supabase");
+      if (configured) {
+        setCfgStatus("ok", "连接配置已保存：" + supaCfg.url + "（仅存在本机浏览器）");
+      } else {
+        setCfgStatus("idle", "尚未保存连接配置");
+      }
       return;
     }
     el.supaWho.textContent = supaSession.email || supaSession.userId;
@@ -2124,17 +2141,29 @@
   }
 
   async function saveSupaConfig() {
-    const url = normalizeSupaUrl(el.supaUrl.value);
-    const key = String(el.supaKey.value || "").trim();
+    const rawUrl = String(el.supaUrl.value == null ? "" : el.supaUrl.value).trim();
+    const rawKey = String(el.supaKey.value == null ? "" : el.supaKey.value).trim();
+
+    if (!rawUrl) {
+      failSupaConfig(
+        "请填写 Supabase 项目地址（Project URL），形如 https://xxxx.supabase.co",
+        el.supaUrl
+      );
+      return;
+    }
+
+    const url = normalizeSupaUrl(rawUrl);
     let parsed = null;
     try {
       parsed = new URL(url);
     } catch (err) {
       parsed = null;
     }
-    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
-      toast("Supabase 地址格式不对，应形如 https://xxxx.supabase.co");
-      el.supaUrl.focus();
+    if (!parsed || !/^https?:$/.test(parsed.protocol) || !parsed.hostname) {
+      failSupaConfig(
+        "项目地址格式不对：需要 https:// 开头的完整地址，例如 https://xxxx.supabase.co",
+        el.supaUrl
+      );
       return;
     }
     if (
@@ -2142,26 +2171,58 @@
       parsed.hostname !== "localhost" &&
       parsed.hostname !== "127.0.0.1"
     ) {
-      toast("线上站点请使用 https:// 的 Supabase 地址");
-      return;
-    }
-    if (!key || /\s/.test(key) || key.length < 20) {
-      toast("anon key 看起来不完整，请从 Supabase 控制台整段复制");
-      el.supaKey.focus();
+      failSupaConfig("线上页面请填写 https:// 的 Supabase 地址", el.supaUrl);
       return;
     }
 
-    const changed = url !== supaCfg.url || key !== supaCfg.anonKey;
+    if (!rawKey) {
+      failSupaConfig(
+        "请填写 anon key：新版以 sb_publishable_ 开头，旧版以 eyJ 开头，两种都支持",
+        el.supaKey
+      );
+      return;
+    }
+    if (/\s/.test(rawKey)) {
+      failSupaConfig(
+        "anon key 中间不能有空格或换行，请从 Supabase 控制台重新完整复制一段",
+        el.supaKey
+      );
+      return;
+    }
+    if (/^sb_secret_/i.test(rawKey)) {
+      failSupaConfig(
+        "这是 secret key（服务端密钥），不能填在网页里；请改用 anon public 或 sb_publishable_ key",
+        el.supaKey
+      );
+      return;
+    }
+    if (rawKey.length < 20) {
+      failSupaConfig(
+        "anon key 太短，像是没复制完整；请重新复制完整一段（sb_publishable_ 或 eyJ 开头）",
+        el.supaKey
+      );
+      return;
+    }
+
+    const changed = url !== supaCfg.url || rawKey !== supaCfg.anonKey;
     if (changed && supaSession) {
       await logout(false);
       supaMeta = { userId: "", baseRev: 0, syncedHash: "", lastSyncAt: 0 };
       saveSupaMeta();
     }
-    supaCfg = { url: url, anonKey: key, auto: supaCfg.auto };
+    supaCfg = { url: url, anonKey: rawKey, auto: supaCfg.auto };
     saveSupaCfg();
     el.supaUrl.value = url;
+    el.supaKey.value = rawKey;
     renderSupaPanel();
     setAuthStatus("idle", "配置已保存，请登录");
+    setCfgStatus(
+      "ok",
+      "连接配置已保存并生效：" +
+        parsed.origin +
+        (rawUrl !== url ? "（已自动补全协议 / 去掉结尾斜杠）" : "") +
+        "。请用邮箱密码登录。"
+    );
     toast("连接配置已保存，请登录");
   }
 
@@ -2674,4 +2735,6 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(renderHeatmap, 200);
   });
+
+  document.documentElement.setAttribute("data-app-ready", "1");
 })();
