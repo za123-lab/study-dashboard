@@ -66,6 +66,25 @@ create trigger study_state_touch
 grant select, insert, update, delete on public.study_state to authenticated;
 revoke all on public.study_state from anon;
 
+-- Realtime：把这张表加入 supabase_realtime 发布列表，
+-- 页面才能通过 WebSocket 收到「云端有新版本」的通知（页面里仍会用 REST 拉取整份数据）
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'study_state'
+  ) then
+    alter publication supabase_realtime add table public.study_state;
+  end if;
+end
+$$;
+
+-- Supabase 控制台的 Database → Replication 里也应能看到 study_state 处于开启状态；
+-- 如果页面状态行提示「实时不可用」，先确认这段 SQL 已执行。
+
 -- 可选：执行完在 SQL Editor 里跑这两句做自检
 -- 期望 authenticated 返回 200 且只能看到自己那一行；anon 返回 401/空
 -- select * from public.study_state;

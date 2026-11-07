@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
   <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css?v=20261108-3">
+  <link rel="stylesheet" href="style.css?v=20261108-4">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -171,7 +171,8 @@
           <button type="button" class="btn ghost" id="supaLogoutBtn">退出登录</button>
         </div>
         <p class="sync-status mono" id="supaSyncStatus" role="status" aria-live="polite">尚未同步</p>
-        <p class="sync-hint">断网时照常记在本机，联网后会自动补传。若云端与本地都被改过，会弹窗让你选「以本地为准 / 以云端为准」，不会自动覆盖。</p>
+        <p class="sync-status mono sync-live" id="supaLiveStatus" role="status" aria-live="polite" data-state="idle">实时：等待登录后连接</p>
+        <p class="sync-hint">登录后会自动接收云端改动：实时订阅 + 回到前台立即检查 + 每 60 秒兜底检查，同一时刻只发一个拉取请求。断网时照常记在本机，联网后会自动补传。若云端与本地都被改过，会弹窗让你选「以本地为准 / 以云端为准」，不会自动覆盖。</p>
       </div>
     </section>
 
@@ -265,7 +266,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-3"></script>
+  <script src="app.js?v=20261108-4"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {

@@ -13,6 +13,8 @@
   const SUPA_META_KEY = "study-supabase-meta-v1"; // 每个账号的云端版本号与上次同步快照
   const SUPA_TIMEOUT = 15000;
   const SYNC_DEBOUNCE = 1500;
+  const PULL_POLL_MS = 60000; // 实时连接断开时的兜底轮询间隔
+  const FOCUS_PULL_GAP = 5000; // 回到前台触发的拉取，最多 5 秒一次
   const DEFAULT_LESSON_MIN = 45; // 旧数据迁移时，每节按 45 分钟折算
   const BILI_URL_RE = /^https?:\/\/(www\.)?bilibili\.com\/video\/BV[0-9A-Za-z]{10}/;
 
@@ -47,6 +49,20 @@
   let suppressAutoSync = false;
   let autoSyncTimer = null;
   let pendingConflict = null; // { remote: { data, rev, updatedAt }, reason }
+
+  // 自动拉取（Realtime + 前台触发 + 60 秒兜底轮询）
+  let pullInFlight = null; // 正在进行的拉取 Promise，用来合并重复触发
+  let pullQueued = false; // 拉取进行中又被触发，结束后补一次
+  let pollTimer = null;
+  let focusPullAt = 0;
+  let realtimeWs = null;
+  let realtimeRef = 0;
+  let realtimeHeartbeat = null;
+  let realtimeRetryTimer = null;
+  let realtimeRetryDelay = 1000;
+  let realtimeLive = false;
+  let realtimeBlocked = false; // 订阅被服务端明确拒绝时不再重试
+  let pendingEditPull = false; // 用户正在输入课时，把云端更新推迟到输入完成
 
   state = loadState();
 
@@ -396,6 +412,7 @@
     supaPullBtn: $("#supaPullBtn"),
     supaLogoutBtn: $("#supaLogoutBtn"),
     supaSyncStatus: $("#supaSyncStatus"),
+    supaLiveStatus: $("#supaLiveStatus"),
     syncPanel: $("#syncPanel"),
     syncConflict: $("#syncConflict"),
     conflictNote: $("#conflictNote"),
@@ -1661,6 +1678,15 @@
       supaSession = sessionFromAuth(body);
       saveStoredJson(SUPA_SESSION_KEY, supaSession);
       supaRefreshPromise = null;
+      // 实时连接用的是 access token，续期后同步过去，避免订阅被踢
+      if (realtimeLive) {
+        realtimeSend({
+          topic: "realtime:public:study_state",
+          event: "access_token",
+          payload: { access_token: supaSession.accessToken },
+          ref: "token-" + (++realtimeRef),
+        });
+      }
       return supaSession;
     });
     supaRefreshPromise.catch(function () {
@@ -1836,6 +1862,7 @@
     el.conflictTakeRemote.disabled = !(remote && remote.data);
     el.syncConflict.hidden = false;
     setSyncStatus("conflict", "冲突：云端与本机都有改动，等你选择");
+    setLiveStatus("hold", "有未处理的冲突，自动拉取已暂停；请先在弹窗里选择保留哪份数据");
   }
 
   function closeConflict() {
@@ -1917,6 +1944,7 @@
       return false;
     } finally {
       supaBusy = false;
+      drainAutoPull();
     }
   }
 
@@ -1988,6 +2016,7 @@
       supaReady = true;
     } finally {
       supaBusy = false;
+      drainAutoPull();
     }
   }
 
@@ -2037,6 +2066,7 @@
       handleSyncError(err, "上传失败");
     } finally {
       supaBusy = false;
+      drainAutoPull();
     }
   }
 
@@ -2045,8 +2075,8 @@
       toast("先登录才能拉取");
       return;
     }
-    if (supaBusy) {
-      toast("上一个同步请求还没结束，稍等一下");
+    if (supaBusy || pullInFlight) {
+      toast("正在检查云端，稍等一下就会自动更新");
       return;
     }
     if (!isOnline()) {
@@ -2081,7 +2111,432 @@
       handleSyncError(err, "拉取失败");
     } finally {
       supaBusy = false;
+      drainAutoPull();
     }
+  }
+
+  // ---------- 自动拉取：Realtime + 回到前台 + 60 秒兜底 ----------
+  // 规则：同一时刻只有一次拉取请求；自动拉取只在本地「没有未上传改动」时才会覆盖本地，
+  // 否则先把本地推上去，推不上去就按现有规则弹冲突框，绝不让云端静默冲掉用户刚记的进度。
+
+  function setLiveStatus(kind, text) {
+    if (!el.supaLiveStatus) return;
+    el.supaLiveStatus.textContent = text;
+    el.supaLiveStatus.dataset.state = kind;
+  }
+
+  function realtimeSend(obj) {
+    if (!realtimeWs || realtimeWs.readyState !== 1) return false;
+    try {
+      realtimeWs.send(JSON.stringify(obj));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function realtimeUrl() {
+    const base = String(supaCfg.url || "")
+      .replace(/^http/i, "ws")
+      .replace(/\/+$/, "");
+    return (
+      base +
+      "/realtime/v1/websocket?apikey=" +
+      encodeURIComponent(supaCfg.anonKey) +
+      "&vsn=1.0.0"
+    );
+  }
+
+  function stopRealtimeHeartbeat() {
+    if (realtimeHeartbeat) {
+      clearInterval(realtimeHeartbeat);
+      realtimeHeartbeat = null;
+    }
+  }
+
+  function startRealtimeHeartbeat() {
+    stopRealtimeHeartbeat();
+    realtimeHeartbeat = setInterval(function () {
+      if (!realtimeWs || realtimeWs.readyState !== 1) return;
+      realtimeSend({
+        topic: "phoenix",
+        event: "heartbeat",
+        payload: {},
+        ref: "hb" + (++realtimeRef),
+      });
+    }, 30000);
+  }
+
+  function closeRealtimeSocket() {
+    realtimeLive = false;
+    stopRealtimeHeartbeat();
+    const ws = realtimeWs;
+    realtimeWs = null;
+    if (ws) {
+      ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
+      try {
+        ws.close();
+      } catch (err) {}
+    }
+  }
+
+  function realtimeErrorText(payload) {
+    const p = payload || {};
+    const raw =
+      p.message ||
+      p.reason ||
+      (p.response && (p.response.message || p.response.reason)) ||
+      "";
+    const s = String(raw);
+    if (/unauthorized|invalid.*(token|jwt)|expired/i.test(s)) return "登录态失效";
+    if (/not.*(enabled|enabled.*realtime)|disabled/i.test(s)) {
+      return "Realtime 没有为这张表启用（在 Supabase 执行最新 schema.sql）";
+    }
+    if (/permission|rls|policy/i.test(s)) return "没有订阅权限（检查 RLS 策略）";
+    return s || "未知原因";
+  }
+
+  /** 实时订阅不可用：降级到轮询，并把原因写成人能看懂的中文 */
+  function realtimeFallback(reason) {
+    realtimeLive = false;
+    clearTimeout(realtimeRetryTimer);
+    realtimeRetryTimer = null;
+    closeRealtimeSocket();
+    setLiveStatus("warn", reason + "；已降级为每 60 秒自动检查云端");
+  }
+
+  function realtimeScheduleRetry(reason) {
+    clearTimeout(realtimeRetryTimer);
+    if (!supaSession || !isOnline() || realtimeBlocked) return;
+    const wait = realtimeRetryDelay;
+    realtimeRetryDelay = Math.min(realtimeRetryDelay * 2, PULL_POLL_MS);
+    setLiveStatus(
+      "warn",
+      reason +
+        "；已降级为每 60 秒自动检查云端，" +
+        Math.round(wait / 1000) +
+        " 秒后重连"
+    );
+    realtimeRetryTimer = setTimeout(function () {
+      realtimeRetryTimer = null;
+      if (!supaSession || !isOnline() || realtimeBlocked) return;
+      if (document.visibilityState === "hidden") return; // 切回前台时再连，省连接数
+      // 重连前先确认 token 还有效（过期就续期），避免带着旧 token 反复被拒
+      ensureSession()
+        .then(realtimeConnect)
+        .catch(function (err) {
+          if (err && (err.status === 400 || err.status === 401)) {
+            logout(false);
+            setAuthStatus("error", "登录已过期，请重新登录");
+            setLiveStatus("error", "实时：登录已过期，已断开；重新登录后恢复自动拉取");
+          } else {
+            setLiveStatus("warn", "实时重连失败，稍后自动再试；期间按每 60 秒检查云端");
+          }
+        });
+    }, wait);
+  }
+
+  function realtimeJoin() {
+    if (!supaSession) return;
+    realtimeSend({
+      topic: "realtime:public:study_state",
+      event: "phx_join",
+      payload: {
+        config: {
+          broadcast: { self: false },
+          presence: { key: "" },
+          postgres_changes: [
+            {
+              event: "*",
+              schema: "public",
+              table: "study_state",
+              filter: "user_id=eq." + supaSession.userId,
+            },
+          ],
+        },
+        access_token: supaSession.accessToken,
+      },
+      ref: "join-" + (++realtimeRef),
+    });
+  }
+
+  function handleRealtimeMessage(ev) {
+    let msg;
+    try {
+      msg = JSON.parse(String(ev.data));
+    } catch (err) {
+      return;
+    }
+    if (!msg || typeof msg.event !== "string") return;
+
+    if (msg.event === "phx_reply") {
+      const reply = msg.payload || {};
+      if (reply.status === "ok") {
+        if (!realtimeLive) {
+          realtimeLive = true;
+          realtimeBlocked = false;
+          realtimeRetryDelay = 1000;
+          startRealtimeHeartbeat();
+          setLiveStatus("ok", "实时：已连接，云端改动会自动拉取");
+          requestPull("实时连接建立");
+        }
+      } else if (!realtimeLive) {
+        realtimeBlocked = true; // 服务端明确拒绝，重试也没用，等重新登录再试
+        realtimeFallback("实时订阅被拒绝：" + realtimeErrorText(reply));
+      }
+      return;
+    }
+
+    if (msg.event === "postgres_changes") {
+      requestPull("云端有新改动");
+      return;
+    }
+
+    if (msg.event === "system" && msg.payload && msg.payload.status === "error") {
+      const reason = realtimeErrorText(msg.payload);
+      if (/登录态失效/.test(reason)) {
+        // token 过期可以续期后重连，不永久放弃
+        realtimeFallback("实时登录态失效");
+        realtimeScheduleRetry("实时登录态失效");
+      } else {
+        realtimeBlocked = true;
+        realtimeFallback("实时不可用：" + reason);
+      }
+    }
+  }
+
+  function realtimeConnect() {
+    if (!supaSession || !supaConfigured() || !isOnline()) return;
+    if (realtimeBlocked) return;
+    if (realtimeWs && (realtimeWs.readyState === 0 || realtimeWs.readyState === 1)) return;
+    if (typeof WebSocket !== "function") {
+      realtimeBlocked = true;
+      setLiveStatus("warn", "这个浏览器不支持实时订阅；已降级为每 60 秒自动检查云端");
+      return;
+    }
+
+    closeRealtimeSocket();
+    let ws;
+    try {
+      ws = new WebSocket(realtimeUrl());
+    } catch (err) {
+      realtimeScheduleRetry("实时连接创建失败");
+      return;
+    }
+    realtimeWs = ws;
+    setLiveStatus("connecting", "实时：正在连接…");
+    ws.onopen = function () {
+      if (ws !== realtimeWs) return;
+      realtimeJoin();
+    };
+    ws.onmessage = handleRealtimeMessage;
+    // 连接出错后浏览器会接着触发 close，统一在 close 里降级 / 重试
+    ws.onerror = function () {};
+    ws.onclose = function () {
+      if (ws !== realtimeWs) return;
+      realtimeWs = null;
+      realtimeLive = false;
+      stopRealtimeHeartbeat();
+      if (!supaSession || realtimeBlocked) return;
+      if (!isOnline()) {
+        setLiveStatus("warn", "离线：实时连接已断开；恢复联网后会自动重连并检查云端");
+        return;
+      }
+      realtimeScheduleRetry("实时连接断开");
+    };
+  }
+
+  function startPolling() {
+    stopPolling();
+    if (!supaSession) return;
+    pollTimer = setInterval(function () {
+      if (document.visibilityState === "hidden") return; // 不可见时暂停，省额度
+      requestPull("定时兜底检查");
+    }, PULL_POLL_MS);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function startAutoPull() {
+    if (!supaSession || !supaConfigured()) return;
+    if (!supaCfg.auto) {
+      setLiveStatus("idle", "自动同步已关闭：自动拉取暂停，需要时点「立即拉取」");
+      return;
+    }
+    if (!isOnline()) {
+      setLiveStatus("warn", "离线：自动拉取已暂停，恢复联网后会立即检查");
+      return;
+    }
+    realtimeBlocked = false;
+    startPolling();
+    realtimeConnect();
+  }
+
+  function stopAutoPull() {
+    stopPolling();
+    closeRealtimeSocket();
+    clearTimeout(realtimeRetryTimer);
+    realtimeRetryTimer = null;
+    realtimeRetryDelay = 1000;
+    realtimeBlocked = false;
+    pullQueued = false;
+    pendingEditPull = false;
+    setLiveStatus("idle", "实时：未登录，自动拉取已暂停");
+  }
+
+  /** 页面重新可见 / 窗口获得焦点：恢复轮询与实时连接，并立刻检查一次（5 秒内只一次） */
+  function onForeground(reason) {
+    if (!supaSession) return;
+    if (document.visibilityState === "hidden") return;
+    const now = Date.now();
+    if (now - focusPullAt < FOCUS_PULL_GAP) return;
+    focusPullAt = now;
+    startPolling();
+    realtimeConnect();
+    requestPull(reason);
+  }
+
+  /** 自动拉取入口：同一时刻只允许一个请求，期间重复触发合并成一次补拉 */
+  function requestPull(reason) {
+    if (!supaSession || !supaConfigured() || !supaReady) return;
+    if (!supaCfg.auto) {
+      setLiveStatus("idle", "自动同步已关闭：自动拉取暂停，需要时点「立即拉取」");
+      return;
+    }
+    if (pendingConflict) {
+      setLiveStatus("hold", "有未处理的冲突，自动拉取已暂停；请先在弹窗里选择保留哪份数据");
+      return;
+    }
+    if (!isOnline()) {
+      setLiveStatus("warn", "离线：自动拉取已暂停，恢复联网后会立即检查");
+      return;
+    }
+    if (pullInFlight || supaBusy) {
+      pullQueued = true;
+      return;
+    }
+    pullInFlight = runAutoPull(reason).then(
+      function () {
+        pullInFlight = null;
+        if (pullQueued && supaSession && !pendingConflict && !supaBusy) {
+          pullQueued = false;
+          requestPull("合并的补拉");
+        }
+      },
+      function () {
+        pullInFlight = null;
+      }
+    );
+  }
+
+  function drainAutoPull() {
+    if (!pullQueued) return;
+    if (pullInFlight || !supaSession || pendingConflict) return;
+    pullQueued = false;
+    requestPull("补拉");
+  }
+
+  /** 从冲突 / 离线等暂停态恢复后，把实时状态行还原成真实连接情况 */
+  function restoreLiveStatus() {
+    if (!supaSession) {
+      setLiveStatus("idle", "实时：未登录，自动拉取已暂停");
+      return;
+    }
+    if (!isOnline()) {
+      setLiveStatus("warn", "离线：自动拉取已暂停，恢复联网后会立即检查云端");
+      return;
+    }
+    if (realtimeLive) {
+      setLiveStatus("ok", "实时：已连接，云端改动会自动拉取");
+    } else {
+      setLiveStatus("warn", "实时未连接；已使用每 60 秒自动检查云端");
+    }
+  }
+
+  /** 自动拉取的判定：本地干净才应用云端；本地有改动则先推，推不上去就弹冲突 */
+  async function runAutoPull(reason) {
+    if (!supaSession || !supaReady || pendingConflict) return;
+    if (supaBusy) {
+      pullQueued = true;
+      return;
+    }
+
+    supaBusy = true;
+    let remote = null;
+    try {
+      remote = await fetchRemote();
+    } catch (err) {
+      if (err && (err.status === 400 || err.status === 401)) {
+        await logout(false);
+        setAuthStatus("error", "登录已过期，请重新登录");
+        setLiveStatus("error", "实时：登录已过期，已断开；重新登录后恢复自动拉取");
+      } else {
+        handleSyncError(err, "检查云端失败");
+        setLiveStatus("warn", "自动拉取失败，记录仍在本机；60 秒后或回到前台会再试");
+      }
+      return;
+    } finally {
+      supaBusy = false;
+    }
+
+    if (!supaSession) return; // 拉取期间退出了登录，不再动本机数据
+
+    const clean = !localDirty();
+    const base = supaMeta.baseRev;
+
+    if (!remote) {
+      // 云端没有这一行：本地有改动就传上去；本地只是干净但记录过版本，说明云端被删了，重建
+      if (hasLocalData() && (!clean || base > 0)) {
+        await pushLocal(0, false);
+      } else {
+        setSyncStatus("ok", "云端暂无数据；记下一笔后会自动上传");
+      }
+      return;
+    }
+
+    if (remote.rev === base) {
+      if (clean) {
+        setSyncStatus("ok", "已是最新 · " + timeLabel(Date.now()));
+      } else {
+        await pushLocal(base, false);
+      }
+      return;
+    }
+
+    if (remote.rev > base) {
+      if (clean) {
+        // 用户正在课时输入框里打字：先不动 DOM，输入完成后再应用云端
+        if (editingCourseField()) {
+          pendingEditPull = true;
+          setLiveStatus("warn", "云端有新版本；正在输入课时，等你输入完成后再自动同步");
+          return;
+        }
+        applyRemote(remote, "已拉取云端更新 · " + timeLabel(Date.now()));
+      } else {
+        showConflict(remote, "云端有更新的版本，本机也有未同步的改动");
+        setLiveStatus("hold", "检测到冲突，自动拉取已暂停；请先在弹窗里选择保留哪份数据");
+      }
+      return;
+    }
+
+    // 云端版本比本机记录的还旧，可能被重置过
+    if (clean) {
+      applyRemote(remote, "云端版本比本机记录旧，已按云端同步");
+    } else {
+      showConflict(remote, "云端版本比本机记录的还旧（可能被重置过）");
+      setLiveStatus("hold", "检测到冲突，自动拉取已暂停；请先在弹窗里选择保留哪份数据");
+    }
+  }
+
+  /** 用户是否正在编辑某门课的课时输入框（此时不要重绘，避免吞掉正在输入的数字） */
+  function editingCourseField() {
+    const a = document.activeElement;
+    return !!a && a.tagName === "INPUT" && a.closest(".course");
   }
 
   function setAuthStatus(kind, text) {
@@ -2112,6 +2567,7 @@
       el.supaUrl.value = supaCfg.url;
       el.supaKey.value = supaCfg.anonKey;
       setAuthStatus("idle", configured ? "已配置，请登录" : "尚未配置 Supabase");
+      setLiveStatus("idle", "实时：未登录，自动拉取已暂停");
       if (configured) {
         setCfgStatus("ok", "连接配置已保存：" + supaCfg.url + "（仅存在本机浏览器）");
       } else {
@@ -2148,6 +2604,7 @@
       renderSupaPanel();
       setSyncStatus("busy", "已登录，正在检查云端…");
       await syncAfterLogin();
+      startAutoPull();
       toast("登录成功");
     } catch (err) {
       setAuthStatus("error", String((err && err.message) || err));
@@ -2160,6 +2617,7 @@
   async function logout(showToast) {
     const old = supaSession;
     clearTimeout(autoSyncTimer);
+    stopAutoPull();
     supaSession = null;
     supaReady = false;
     pendingConflict = null;
@@ -2294,6 +2752,7 @@
     if (!isOnline()) {
       supaReady = true;
       setSyncStatus("error", "离线：已使用本机缓存；联网后自动续期并同步");
+      setLiveStatus("warn", "离线：自动拉取已暂停，恢复联网后会立即检查云端");
       return;
     }
     try {
@@ -2301,6 +2760,7 @@
         await refreshSession();
       }
       await syncAfterLogin();
+      startAutoPull();
     } catch (err) {
       if (err && (err.status === 400 || err.status === 401)) {
         await logout(false);
@@ -2368,6 +2828,7 @@
       } else {
         setSyncStatus("busy", "已登录，正在同步…");
       }
+      setLiveStatus("connecting", "实时：正在连接…");
       restoreSession();
     } else if (supaSession) {
       // 配置被清掉但还留着 token：token 已经没用了
@@ -2376,6 +2837,7 @@
         localStorage.removeItem(SUPA_SESSION_KEY);
       } catch (err) {}
       setSyncStatus("idle", "尚未配置");
+      setLiveStatus("idle", "实时：未登录，自动拉取已暂停");
     }
   }
 
@@ -2383,6 +2845,7 @@
     if (!supaSession) return;
     supaReady = false;
     setSyncStatus("busy", "网络已恢复，正在同步…");
+    setLiveStatus("connecting", "网络已恢复，正在重连实时订阅…");
     if (supaBusy) {
       setTimeout(function () {
         if (!supaBusy) restoreSession();
@@ -2395,6 +2858,31 @@
   window.addEventListener("offline", function () {
     if (!supaSession) return;
     setSyncStatus("error", "离线：记录照常保存在本机，联网后自动同步");
+    setLiveStatus("warn", "离线：自动拉取已暂停，恢复联网后会立即检查云端");
+  });
+
+  // 页面重新可见：恢复轮询（不可见时暂停），并立即检查一次云端
+  document.addEventListener("visibilitychange", function () {
+    if (!supaSession) return;
+    if (document.visibilityState === "hidden") {
+      stopPolling();
+      return;
+    }
+    onForeground("回到页面");
+  });
+
+  window.addEventListener("focus", function () {
+    onForeground("窗口获得焦点");
+  });
+
+  // 正在输入课时时被推迟的云端更新：输入完成后再拉取
+  document.addEventListener("focusout", function () {
+    if (!pendingEditPull) return;
+    setTimeout(function () {
+      if (editingCourseField()) return; // 焦点只是换到另一个课时输入框，继续等
+      pendingEditPull = false;
+      requestPull("输入完成");
+    }, 600);
   });
 
   // ---------- 事件 ----------
@@ -2560,11 +3048,17 @@
     saveSupaCfg();
     if (!supaCfg.auto) {
       clearTimeout(autoSyncTimer);
+      stopPolling();
+      closeRealtimeSocket();
       setSyncStatus("idle", "自动同步已关闭；改动只保存在本机");
+      setLiveStatus("idle", "自动同步已关闭：自动拉取暂停，需要时点「立即拉取」");
       toast("已关闭自动同步");
     } else {
       toast("已开启自动同步");
-      if (supaReady) syncAfterLogin();
+      if (supaReady) {
+        syncAfterLogin();
+        startAutoPull();
+      }
     }
   });
 
@@ -2583,6 +3077,7 @@
     if (applyRemote(remote, "已用云端覆盖本地")) {
       toast("已用云端覆盖本地");
     }
+    restoreLiveStatus();
   });
 
   el.conflictPushLocal.addEventListener("click", function () {
@@ -2590,6 +3085,7 @@
     const base = pendingConflict.remote ? pendingConflict.remote.rev : supaMeta.baseRev;
     closeConflict();
     pendingConflict = null;
+    restoreLiveStatus();
     toast("正在用本地覆盖云端…");
     pushLocal(base, true);
   });

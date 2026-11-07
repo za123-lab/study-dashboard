@@ -1128,6 +1128,24 @@ input:focus {
   border-left-color: var(--ink);
 }
 
+/* 降级 / 暂停 / 连接中：用琥珀色区分「有问题但仍在工作」 */
+.sync-status[data-state="warn"],
+.sync-status[data-state="hold"],
+.sync-status[data-state="connecting"] {
+  color: #8a6520;
+  background: rgba(201, 154, 58, 0.08);
+  border-left-color: #c99a3a;
+}
+
+.sync-status[data-state="idle"] {
+  color: var(--ink-faint);
+}
+
+.sync-live {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
 .sync-hint {
   margin: 8px 0 0;
   font-size: 11.5px;
