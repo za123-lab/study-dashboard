@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
+  <title>学习进度手账</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 笔记本左侧红色装订线（纯装饰） -->
+  <div class="margin-line" aria-hidden="true"></div>
+
+  <main class="wrap">
+    <header class="masthead reveal">
+      <div>
+        <p class="kicker mono">STUDY LOG · 学习记录</p>
+        <h1>学习进度手账</h1>
+        <p class="sub" id="todayLine">——</p>
+      </div>
+      <div class="stamp" id="streakStamp" title="连续打卡天数">
+        <span class="stamp-num mono" id="streakNum">0</span>
+        <span class="stamp-label">连续打卡 · 天</span>
+      </div>
+    </header>
+
+    <!-- 总览统计 -->
+    <section class="stats reveal" aria-label="总体进度">
+      <div class="ring-card">
+        <div class="ring" id="overallRing" role="img" aria-label="总体完成进度">
+          <div class="ring-inner">
+            <span class="mono big" id="overallPct">0%</span>
+            <span class="ring-cap">总进度</span>
+          </div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-num mono" id="statCourses">0</span>
+        <span class="stat-cap">在学课程</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-num mono" id="statDone">0</span>
+        <span class="stat-cap">已完成集数</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-num mono" id="statRemain">0</span>
+        <span class="stat-cap">待学习集数</span>
+      </div>
+    </section>
+
+    <!-- 学习日历热力图 -->
+    <section class="panel reveal">
+      <div class="panel-head">
+        <h2>学习日历</h2>
+        <p class="panel-cap">每勾选一集，当日格子的颜色就会加深</p>
+      </div>
+      <div id="heatmap" class="heatmap" aria-label="学习打卡热力图"></div>
+      <div class="heat-legend">
+        <span>少</span>
+        <i class="cell l0"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i><i class="cell l4"></i>
+        <span>多</span>
+      </div>
+    </section>
+
+    <!-- 添加课程 -->
+    <section class="panel reveal">
+      <div class="panel-head">
+        <h2>登记新课程</h2>
+        <p class="panel-cap">填课程名和总集数，之后每看完一集就来勾一笔</p>
+      </div>
+      <form id="addForm" class="add-form">
+        <label class="field grow">
+          <span>课程名称</span>
+          <input type="text" id="courseName" maxlength="40" placeholder="例如：C 语言程序设计" required>
+        </label>
+        <label class="field">
+          <span>总集数</span>
+          <input type="number" id="courseTotal" min="1" max="999" placeholder="例如 86" required>
+        </label>
+        <button type="submit" class="btn primary">记上这笔</button>
+      </form>
+    </section>
+
+    <!-- 课程列表 -->
+    <section class="courses" id="courseList" aria-live="polite"></section>
+
+    <!-- 空状态 -->
+    <div class="empty" id="emptyState" hidden>
+      <div class="empty-icon" aria-hidden="true">✎</div>
+      <h3>本子还是空的</h3>
+      <p>在上方登记第一门课程，或者先看看示例效果：</p>
+      <button class="btn ghost" id="seedBtn">填入示例课程</button>
+    </div>
+
+    <footer class="foot reveal">
+      <p class="foot-note">数据保存在本浏览器中，换设备或清理缓存前请先导出备份。</p>
+      <div class="foot-actions">
+        <button class="btn ghost" id="exportBtn">导出数据</button>
+        <button class="btn ghost" id="importBtn">导入数据</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+        <button class="btn ghost danger" id="clearBtn">清空数据</button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- 轻提示 -->
+  <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
