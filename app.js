@@ -482,7 +482,7 @@
       '<button type="button" class="btn ghost add-lesson" data-cid="' +
       course.id +
       '">+ 添加一节</button>' +
-      '<span class="note">时长填 45 或 0:45；链接只存地址，方便点开</span>' +
+      '<span class="note">时长填 45 或 0:45；导入来的课时会带一个「B 站」链接</span>' +
       "</div>" +
       "</article>"
     );
@@ -536,18 +536,11 @@
       (idx + 1) +
       ' 节" title="删除这一节">✕</button>' +
       "</span>" +
-      '<span class="l-link-wrap">' +
-      '<input class="l-link" value="' +
-      escapeHtml(lesson.url || "") +
-      '" placeholder="该节 B 站链接（可选）" aria-label="第 ' +
-      (idx + 1) +
-      ' 节 B 站链接">' +
       (lesson.url
         ? '<a class="l-open" href="' +
           escapeHtml(lesson.url) +
-          '" target="_blank" rel="noopener noreferrer" title="在新标签打开">↗</a>'
+          '" target="_blank" rel="noopener noreferrer" title="在新标签打开这一节的 B 站视频">B 站 ↗</a>'
         : "") +
-      "</span>" +
       (noTotal
         ? '<span class="l-warn">未填总时长，这一节不计入统计</span>'
         : "") +
@@ -787,22 +780,6 @@
     "",
     "视频链接：<把 B 站链接粘在这里>",
   ].join("\n");
-
-  /** 从完整链接或纯 BV 号里取出 bvid 与分 P */
-  function parseBiliLink(raw) {
-    const s = String(raw == null ? "" : raw).trim();
-    if (!s) return null;
-    const m = s.match(/BV[0-9A-Za-z]{10}/);
-    if (!m) return null;
-    const bvid = m[0];
-    const pm = s.match(/[?&]p=(\d+)/);
-    const p = pm ? parseInt(pm[1], 10) : 0;
-    return {
-      bvid: bvid,
-      p: p,
-      url: "https://www.bilibili.com/video/" + bvid + (p ? "?p=" + p : ""),
-    };
-  }
 
   /** 秒数 → "m:ss" / "h:mm:ss" */
   function fmtHMS(seconds) {
@@ -1249,37 +1226,6 @@
     }
   }
 
-  /** 保存一节的视频链接（只存地址方便点开，不再请求任何接口） */
-  function handleLessonLink(courseId, lessonId, raw) {
-    const course = findCourse(courseId);
-    if (!course) return;
-    const lesson = findLesson(course, lessonId);
-    if (!lesson) return;
-
-    const text = String(raw == null ? "" : raw).trim();
-    if (!text) {
-      if (lesson.url) {
-        delete lesson.url;
-        saveState();
-      }
-      renderAll();
-      return;
-    }
-
-    const parsed = parseBiliLink(text);
-    if (!parsed) {
-      toast("没认出 BV 号，请粘贴 bilibili.com/video/BV… 形式的链接，或直接填 BV 号");
-      renderAll();
-      return;
-    }
-    if (lesson.url === parsed.url) return;
-
-    lesson.url = parsed.url;
-    saveState();
-    renderAll();
-    toast("已保存这一节的链接，点 ↗ 打开");
-  }
-
   // ---------- 云同步（可选，Cloudflare Workers + D1） ----------
   // 契约：GET /sync/{code} → { data, updatedAt }；PUT 带 baseUpdatedAt，
   // 版本不一致返回 409 且附服务端内容。任何冲突都必须由用户选择，绝不自动覆盖。
@@ -1716,13 +1662,6 @@
 
   // 输入框失焦 / 回车时提交
   el.courseList.addEventListener("change", function (e) {
-    const link = e.target.closest(".l-link");
-    if (link) {
-      const row = link.closest(".lesson");
-      handleLessonLink(row.dataset.cid, row.dataset.lid, link.value);
-      return;
-    }
-
     const input = e.target.closest(".l-input");
     if (!input) return;
     const row = input.closest(".lesson");
@@ -1731,7 +1670,7 @@
 
   el.courseList.addEventListener("keydown", function (e) {
     if (e.key !== "Enter") return;
-    const input = e.target.closest(".l-input, .l-link");
+    const input = e.target.closest(".l-input");
     if (!input) return;
     e.preventDefault();
     input.blur();

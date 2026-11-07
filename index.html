@@ -85,7 +85,56 @@
       </form>
     </section>
 
-    <!-- B 站课程导入：提示词 → AI 输出 JSON → 预览 → 写入 -->
+    <!-- 课程列表 -->
+    <section class="courses" id="courseList" aria-live="polite"></section>
+
+    <!-- 空状态 -->
+    <div class="empty" id="emptyState" hidden>
+      <div class="empty-icon" aria-hidden="true">✎</div>
+      <h3>本子还是空的</h3>
+      <p>在上方登记第一门课程，或者先看看示例效果：</p>
+      <button class="btn ghost" id="seedBtn">填入示例课程</button>
+    </div>
+
+    <!-- 设置：云同步（可选，不填也能正常用） -->
+    <section class="panel reveal" id="syncPanel">
+      <div class="panel-head">
+        <h2>设置 · 云同步</h2>
+        <p class="panel-cap">可选：把进度备份到自己的 Cloudflare D1，多设备用同一同步码互通</p>
+      </div>
+
+      <div class="sync-grid">
+        <label class="field grow">
+          <span>同步码（当作口令，至少 16 位）</span>
+          <div class="secret-wrap">
+            <input type="password" id="syncCode" class="mono" autocomplete="off" spellcheck="false"
+              placeholder="自己定一个至少 16 位的口令，不要外传">
+            <button type="button" class="btn ghost secret-toggle" id="syncCodeToggle" aria-pressed="false">显示</button>
+          </div>
+        </label>
+        <label class="field grow">
+          <span>Worker 地址</span>
+          <input type="url" id="syncBase" class="mono" spellcheck="false"
+            placeholder="https://study-dashboard-sync.xxx.workers.dev">
+        </label>
+      </div>
+
+      <label class="sync-auto">
+        <input type="checkbox" id="syncAuto">
+        <span>每次修改后自动上传（可选）</span>
+      </label>
+
+      <div class="sync-actions">
+        <button type="button" class="btn primary" id="syncUploadBtn">立即上传</button>
+        <button type="button" class="btn ghost" id="syncPullBtn">立即拉取</button>
+        <button type="button" class="btn ghost" id="syncForgetBtn">清除本机同步设置</button>
+      </div>
+
+      <p class="sync-status mono" id="syncStatus" role="status" aria-live="polite">尚未同步</p>
+      <p class="sync-hint">同步码只存在本机；同一同步码可在另一台设备拉取。上传时若云端已被别处改过，会先弹窗让你选择保留哪一份。断网时所有记录仍在本地，不影响使用。</p>
+    </section>
+
+    <!-- B 站课程导入：提示词 → AI 输出 JSON → 预览 → 写入（放在最后，不打断主流程） -->
     <section class="panel reveal">
       <div class="panel-head">
         <h2>B 站课程导入</h2>
@@ -134,55 +183,6 @@
           <button type="button" class="btn ghost" id="cancelImportBtn">取消</button>
         </div>
       </div>
-    </section>
-
-    <!-- 课程列表 -->
-    <section class="courses" id="courseList" aria-live="polite"></section>
-
-    <!-- 空状态 -->
-    <div class="empty" id="emptyState" hidden>
-      <div class="empty-icon" aria-hidden="true">✎</div>
-      <h3>本子还是空的</h3>
-      <p>在上方登记第一门课程，或者先看看示例效果：</p>
-      <button class="btn ghost" id="seedBtn">填入示例课程</button>
-    </div>
-
-    <!-- 设置：云同步（可选，不填也能正常用） -->
-    <section class="panel reveal" id="syncPanel">
-      <div class="panel-head">
-        <h2>设置 · 云同步</h2>
-        <p class="panel-cap">可选：把进度备份到自己的 Cloudflare D1，多设备用同一同步码互通</p>
-      </div>
-
-      <div class="sync-grid">
-        <label class="field grow">
-          <span>同步码（当作口令，至少 16 位）</span>
-          <div class="secret-wrap">
-            <input type="password" id="syncCode" class="mono" autocomplete="off" spellcheck="false"
-              placeholder="自己定一个至少 16 位的口令，不要外传">
-            <button type="button" class="btn ghost secret-toggle" id="syncCodeToggle" aria-pressed="false">显示</button>
-          </div>
-        </label>
-        <label class="field grow">
-          <span>Worker 地址</span>
-          <input type="url" id="syncBase" class="mono" spellcheck="false"
-            placeholder="https://study-dashboard-sync.xxx.workers.dev">
-        </label>
-      </div>
-
-      <label class="sync-auto">
-        <input type="checkbox" id="syncAuto">
-        <span>每次修改后自动上传（可选）</span>
-      </label>
-
-      <div class="sync-actions">
-        <button type="button" class="btn primary" id="syncUploadBtn">立即上传</button>
-        <button type="button" class="btn ghost" id="syncPullBtn">立即拉取</button>
-        <button type="button" class="btn ghost" id="syncForgetBtn">清除本机同步设置</button>
-      </div>
-
-      <p class="sync-status mono" id="syncStatus" role="status" aria-live="polite">尚未同步</p>
-      <p class="sync-hint">同步码只存在本机；同一同步码可在另一台设备拉取。上传时若云端已被别处改过，会先弹窗让你选择保留哪一份。断网时所有记录仍在本地，不影响使用。</p>
     </section>
 
     <footer class="foot reveal">
