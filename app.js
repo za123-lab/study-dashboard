@@ -187,7 +187,8 @@
   // ---------- 读取 / 迁移 / 保存 ----------
 
   function emptyState() {
-    return { v: 2, courses: [], activity: {} };
+    // demoActivity 只记「示例打卡」那部分分钟数，方便把示例与真实记录分开清除
+    return { v: 2, courses: [], activity: {}, demoActivity: {} };
   }
 
   function loadState() {
@@ -254,11 +255,14 @@
       }
       return lesson;
     });
-    return {
+    const course = {
       id: String(c.id || makeId()),
       name: String(c.name).slice(0, 40).trim(),
       lessons: lessons,
     };
+    // 示例课程打标记，用于界面提示与「清除示例数据」
+    if (c.demo === true) course.demo = true;
+    return course;
   }
 
   /** 把外部数据（本地存储或导入的 JSON）整理成可信结构，非法则返回 null */
@@ -292,7 +296,19 @@
     });
 
     if (isV1) migratedOnLoad = true;
-    return { v: 2, courses: courses, activity: activity };
+    // 示例打卡的分钟数单独记一份，清除示例时不误伤真实打卡
+    const demoActivity = {};
+    const rawDemo =
+      data.demoActivity && typeof data.demoActivity === "object"
+        ? data.demoActivity
+        : {};
+    Object.keys(rawDemo).forEach(function (k) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+      const value = clampInt(rawDemo[k], 0, 99999, 0);
+      if (value > 0) demoActivity[k] = value;
+    });
+
+    return { v: 2, courses: courses, activity: activity, demoActivity: demoActivity };
   }
 
   // ---------- DOM ----------
@@ -311,6 +327,9 @@
     statDoneCap: $("#statDoneCap"),
     statWatched: $("#statWatched"),
     heatmap: $("#heatmap"),
+    heatNote: $("#heatNote"),
+    heatNoteText: $("#heatNoteText"),
+    heatResetBtn: $("#heatResetBtn"),
     addForm: $("#addForm"),
     courseName: $("#courseName"),
     courseCount: $("#courseCount"),
@@ -318,9 +337,13 @@
     courseList: $("#courseList"),
     emptyState: $("#emptyState"),
     seedBtn: $("#seedBtn"),
+    demoNotice: $("#demoNotice"),
+    demoNoticeText: $("#demoNoticeText"),
+    demoClearBtn: $("#demoClearBtn"),
     exportBtn: $("#exportBtn"),
     importBtn: $("#importBtn"),
     importFile: $("#importFile"),
+    resetActivityBtn: $("#resetActivityBtn"),
     clearBtn: $("#clearBtn"),
     promptText: $("#promptText"),
     copyPromptBtn: $("#copyPromptBtn"),
@@ -362,6 +385,8 @@
     renderCourses();
     renderHeatmap();
     renderStreak();
+    renderDemoNotice();
+    renderHeatNote();
   }
 
   function renderHeader() {
@@ -444,6 +469,7 @@
       '<div class="course-title">' +
       "<h3>" +
       escapeHtml(course.name) +
+      (course.demo ? '<span class="demo-tag">示例</span>' : "") +
       "</h3>" +
       '<p class="mono course-meta">' +
       "加权 <span class=\"pct\">" +
@@ -586,6 +612,51 @@
     el.streakNum.textContent = streak;
   }
 
+  /** 示例数据的规模：几门示例课程、几天示例打卡 */
+  function demoSummary() {
+    let demoCourses = 0;
+    state.courses.forEach(function (c) {
+      if (c.demo) demoCourses++;
+    });
+    let demoDays = 0;
+    let demoMin = 0;
+    Object.keys(state.demoActivity || {}).forEach(function (k) {
+      demoDays++;
+      demoMin += state.demoActivity[k];
+    });
+    return { demoCourses: demoCourses, demoDays: demoDays, demoMin: demoMin };
+  }
+
+  /** 当前是否还在看示例数据 —— 明确提示，避免把演示进度当成真实记录 */
+  function renderDemoNotice() {
+    const s = demoSummary();
+    const show = s.demoCourses > 0 || s.demoDays > 0;
+    el.demoNotice.hidden = !show;
+    if (!show) return;
+    const parts = [];
+    if (s.demoCourses) parts.push(s.demoCourses + " 门示例课程");
+    if (s.demoDays) {
+      parts.push(s.demoDays + " 天示例打卡（共 " + s.demoMin + " 分钟）");
+    }
+    el.demoNoticeText.textContent =
+      "当前是示例数据：" + parts.join("、") + "，不是你的真实学习记录。";
+  }
+
+  /** 打卡有记录但一门课都没有时，说明这些记录已失去来源 */
+  function renderHeatNote() {
+    let total = 0;
+    Object.keys(state.activity).forEach(function (k) {
+      total += state.activity[k];
+    });
+    const orphan = state.courses.length === 0 && total > 0;
+    el.heatNote.hidden = !orphan;
+    if (!orphan) return;
+    el.heatNoteText.textContent =
+      "日历上还留着 " +
+      total +
+      " 分钟打卡，但当前没有任何课程支撑（课程可能已被删除）。这些记录不会自动消失，想清掉请点右侧「重置打卡记录」。";
+  }
+
   // ---------- 数据操作 ----------
 
   function findCourse(id) {
@@ -610,6 +681,81 @@
     } else {
       delete state.activity[key];
     }
+  }
+
+  /** 从日历里扣掉示例打卡的部分，真实打卡保留 */
+  function subtractDemoActivity() {
+    Object.keys(state.demoActivity || {}).forEach(function (key) {
+      const left = (state.activity[key] || 0) - state.demoActivity[key];
+      if (left > 0) {
+        state.activity[key] = left;
+      } else {
+        delete state.activity[key];
+      }
+    });
+    state.demoActivity = {};
+  }
+
+  /** 清除示例：示例课程 + 示例打卡，自己登记的课程和打卡不动 */
+  function clearDemoData() {
+    const s = demoSummary();
+    if (!s.demoCourses && !s.demoDays) {
+      toast("现在没有示例数据");
+      return;
+    }
+    const parts = [];
+    if (s.demoCourses) parts.push(s.demoCourses + " 门示例课程");
+    if (s.demoDays) {
+      parts.push(s.demoDays + " 天示例打卡（共 " + s.demoMin + " 分钟）");
+    }
+    if (
+      !confirm(
+        "清除示例数据？将删掉 " +
+          parts.join("、") +
+          "。你自己登记的课程和打卡不受影响。"
+      )
+    ) {
+      return;
+    }
+
+    const demoIds = new Set();
+    state.courses.forEach(function (c) {
+      if (c.demo) demoIds.add(c.id);
+    });
+    state.courses = state.courses.filter(function (c) {
+      return !c.demo;
+    });
+    subtractDemoActivity();
+
+    demoIds.forEach(function (id) {
+      openIds.delete(id);
+      seenIds.delete(id);
+    });
+
+    saveState();
+    renderAll();
+    toast("已清除示例数据，示例打卡也一并清掉了");
+  }
+
+  /** 重置打卡：只清 activity / demoActivity，课程与每节已看时长保留 */
+  function resetActivity() {
+    const total = Object.keys(state.activity).length;
+    if (total === 0) {
+      toast("现在没有打卡记录");
+      return;
+    }
+    if (
+      !confirm(
+        "只清空学习打卡记录？日历热力图和连续打卡天数会归零，课程及每节已看时长都会保留。此操作不可撤销。"
+      )
+    ) {
+      return;
+    }
+    state.activity = {};
+    state.demoActivity = {};
+    saveState();
+    renderAll();
+    toast("打卡记录已重置，课程和已看时长都还在");
   }
 
   function addCourse(name, count, defaultMin) {
@@ -1802,27 +1948,38 @@
       });
     }
 
-    state.courses = [
-      { id: makeId(), name: "C 语言程序设计", lessons: cLessons },
-      { id: makeId(), name: "大学计算机基础", lessons: bLessons },
-    ];
-
-    [7, 6, 5, 3, 2, 1].forEach(function (back, idx) {
-      state.activity[dateKey(addDays(today, -back))] = [45, 90, 20, 60, 30, 120][idx];
+    // 只替换上一次的示例课程，自己登记的课程保留
+    state.courses = state.courses.filter(function (c) {
+      return !c.demo;
     });
-    delete state.activity[dateKey(today)]; // 今天留空，由你自己记
+
+    state.courses.push(
+      { id: makeId(), name: "C 语言程序设计", lessons: cLessons, demo: true },
+      { id: makeId(), name: "大学计算机基础", lessons: bLessons, demo: true }
+    );
+
+    // 先扣掉上一次的示例打卡，再写入新的，避免重复叠加
+    subtractDemoActivity();
+    const demo = {};
+    [7, 6, 5, 3, 2, 1].forEach(function (back, idx) {
+      const key = dateKey(addDays(today, -back));
+      const min = [45, 90, 20, 60, 30, 120][idx];
+      demo[key] = min;
+      state.activity[key] = (state.activity[key] || 0) + min;
+    });
+    state.demoActivity = demo;
 
     saveState();
     seenIds.clear();
     openIds.clear();
     renderAll();
-    toast("已填入示例课程，随时可以删掉换成你自己的");
+    toast("已填入示例课程（带「示例」标记），随时可以一键清除");
   });
 
   // ---------- 导入导出 ----------
 
   el.exportBtn.addEventListener("click", function () {
-    if (state.courses.length === 0) {
+    if (state.courses.length === 0 && Object.keys(state.activity).length === 0) {
       toast("还没有数据可以导出");
       return;
     }
@@ -1832,6 +1989,7 @@
         exportedAt: new Date().toISOString(),
         courses: state.courses,
         activity: state.activity,
+        demoActivity: state.demoActivity,
       },
       null,
       2
@@ -1891,18 +2049,31 @@
   });
 
   el.clearBtn.addEventListener("click", function () {
-    if (state.courses.length === 0) {
+    if (
+      state.courses.length === 0 &&
+      Object.keys(state.activity).length === 0
+    ) {
       toast("现在就是空的，不用清");
       return;
     }
-    if (!confirm("清空所有课程和学习记录？此操作不可撤销，建议先导出备份。")) return;
+    if (
+      !confirm(
+        "清空所有课程和打卡记录？课程、每节已看时长、日历打卡会一起清除，且不可撤销。建议先导出备份。"
+      )
+    ) {
+      return;
+    }
     state = emptyState();
     saveState();
     seenIds.clear();
     openIds.clear();
     renderAll();
-    toast("已清空，本子重新开张");
+    toast("已清空课程和打卡，本子重新开张");
   });
+
+  el.demoClearBtn.addEventListener("click", clearDemoData);
+  el.resetActivityBtn.addEventListener("click", resetActivity);
+  el.heatResetBtn.addEventListener("click", resetActivity);
 
   function toast(msg) {
     el.toast.textContent = msg;

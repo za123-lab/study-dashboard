@@ -387,6 +387,31 @@ h1 {
   margin: 0 4px;
 }
 
+/* 打卡失去课程支撑时的提示条 */
+.heat-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  background: rgba(192, 69, 58, 0.05);
+  border-left: 3px solid rgba(192, 69, 58, 0.45);
+}
+
+.heat-note[hidden] {
+  display: none;
+}
+
+.btn-inline {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 /* ---------- 表单 ---------- */
 
 .add-form {
@@ -530,6 +555,20 @@ input:focus {
   font-weight: 700;
   letter-spacing: 0.03em;
   word-break: break-word;
+}
+
+/* 示例课程标记 */
+.demo-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--red);
+  border: 1px solid rgba(192, 69, 58, 0.35);
+  border-radius: 2px;
+  vertical-align: 2px;
 }
 
 .course-meta {
@@ -1098,6 +1137,37 @@ input:focus {
 .modal-actions .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ---------- 示例数据提示 ---------- */
+
+.demo-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: -6px 0 26px;
+  padding: 12px 16px;
+  background: rgba(192, 69, 58, 0.06);
+  border: 1px dashed rgba(192, 69, 58, 0.35);
+  border-radius: var(--radius);
+}
+
+.demo-notice[hidden] {
+  display: none;
+}
+
+.demo-notice-text {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--red-deep);
+}
+
+.demo-notice .btn {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 /* ---------- 空状态 ---------- */

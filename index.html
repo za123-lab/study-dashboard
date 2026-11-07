@@ -60,6 +60,11 @@
         <i class="cell l0"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i><i class="cell l4"></i>
         <span>多</span>
       </div>
+      <!-- 打卡还在但已没有课程支撑时，明确提示，不静默保留 -->
+      <p class="heat-note" id="heatNote" hidden>
+        <span id="heatNoteText"></span>
+        <button type="button" class="btn ghost btn-inline" id="heatResetBtn">重置打卡记录</button>
+      </p>
     </section>
 
     <!-- 添加课程 -->
@@ -87,6 +92,12 @@
 
     <!-- 课程列表 -->
     <section class="courses" id="courseList" aria-live="polite"></section>
+
+    <!-- 示例数据提示：示例课程与示例打卡可一键清除，不影响真实记录 -->
+    <div class="demo-notice" id="demoNotice" hidden>
+      <p class="demo-notice-text" id="demoNoticeText"></p>
+      <button type="button" class="btn ghost" id="demoClearBtn">清除示例数据</button>
+    </div>
 
     <!-- 空状态 -->
     <div class="empty" id="emptyState" hidden>
@@ -191,6 +202,7 @@
         <button class="btn ghost" id="exportBtn">导出数据</button>
         <button class="btn ghost" id="importBtn">导入数据</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
+        <button class="btn ghost" id="resetActivityBtn">重置打卡记录</button>
         <button class="btn ghost danger" id="clearBtn">清空数据</button>
       </div>
     </footer>
