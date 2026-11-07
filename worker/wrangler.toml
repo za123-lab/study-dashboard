@@ -1,0 +1,16 @@
+name = "study-dashboard-sync"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# 部署前必做：wrangler d1 create study-dashboard
+# 然后把命令输出的 database_id 填到下面这行（整个文件只需改这一处）
+[[d1_databases]]
+binding = "DB"
+database_name = "study-dashboard"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+# 唯一允许跨域读取数据的页面来源
+# 本地联调 wrangler dev 时，可临时改成 http://127.0.0.1:8765
+ALLOWED_ORIGIN = "https://za123-lab.github.io"

@@ -40,11 +40,11 @@
       </div>
       <div class="stat-card">
         <span class="stat-num mono" id="statDone">0</span>
-        <span class="stat-cap">已完成集数</span>
+        <span class="stat-cap" id="statDoneCap">已看完节数</span>
       </div>
       <div class="stat-card">
-        <span class="stat-num mono" id="statRemain">0</span>
-        <span class="stat-cap">待学习集数</span>
+        <span class="stat-num mono" id="statWatched">0:00</span>
+        <span class="stat-cap">累计观看时长</span>
       </div>
     </section>
 
@@ -52,7 +52,7 @@
     <section class="panel reveal">
       <div class="panel-head">
         <h2>学习日历</h2>
-        <p class="panel-cap">每勾选一集，当日格子的颜色就会加深</p>
+        <p class="panel-cap">颜色深浅代表当天累计看了多少分钟</p>
       </div>
       <div id="heatmap" class="heatmap" aria-label="学习打卡热力图"></div>
       <div class="heat-legend">
@@ -66,7 +66,7 @@
     <section class="panel reveal">
       <div class="panel-head">
         <h2>登记新课程</h2>
-        <p class="panel-cap">填课程名和总集数，之后每看完一集就来勾一笔</p>
+        <p class="panel-cap">填课程名、节数和每节默认时长，之后逐节记录看到第几分钟</p>
       </div>
       <form id="addForm" class="add-form">
         <label class="field grow">
@@ -74,11 +74,66 @@
           <input type="text" id="courseName" maxlength="40" placeholder="例如：C 语言程序设计" required>
         </label>
         <label class="field">
-          <span>总集数</span>
-          <input type="number" id="courseTotal" min="1" max="999" placeholder="例如 86" required>
+          <span>节数</span>
+          <input type="number" id="courseCount" min="1" max="999" placeholder="例如 86" required>
+        </label>
+        <label class="field">
+          <span>每节默认时长</span>
+          <input type="text" id="courseDefault" placeholder="45 或 0:45" value="45">
         </label>
         <button type="submit" class="btn primary">记上这笔</button>
       </form>
+    </section>
+
+    <!-- B 站课程导入：提示词 → AI 输出 JSON → 预览 → 写入 -->
+    <section class="panel reveal">
+      <div class="panel-head">
+        <h2>B 站课程导入</h2>
+        <p class="panel-cap">让 AI 把分 P 时长整理成 JSON，粘贴进来一次建好整门课</p>
+      </div>
+
+      <div class="import-step">
+        <p class="step-cap"><span class="step-no mono">①</span>复制提示词，连同 B 站链接一起发给任意 AI（DeepSeek、豆包、ChatGPT 都行）</p>
+        <div class="prompt-box">
+          <pre class="prompt-text mono" id="promptText"></pre>
+          <button type="button" class="btn ghost prompt-copy" id="copyPromptBtn">复制提示词</button>
+        </div>
+      </div>
+
+      <div class="import-step">
+        <p class="step-cap"><span class="step-no mono">②</span>把 AI 返回的 JSON 粘到下面，先预览再写入</p>
+        <textarea id="biliJson" class="bili-json mono" rows="5" spellcheck="false" aria-label="粘贴 AI 返回的 B 站课程 JSON"
+          placeholder='{"bvid":"BV1xx411c7mD","title":"课程标题","lessons":[{"page":1,"title":"P1 标题","duration":"12:34"}]}'></textarea>
+        <div class="import-actions">
+          <button type="button" class="btn primary" id="previewBtn">解析并预览</button>
+          <button type="button" class="btn ghost" id="biliClearBtn">清空</button>
+        </div>
+        <div class="import-error mono" id="biliError" role="alert" hidden></div>
+      </div>
+
+      <div class="import-preview" id="biliPreview" hidden>
+        <div class="preview-head">
+          <h3 id="previewTitle"></h3>
+          <p class="preview-meta mono" id="previewMeta"></p>
+        </div>
+        <div class="preview-table-wrap">
+          <table class="preview-table">
+            <thead>
+              <tr><th>分 P</th><th>标题</th><th>时长</th><th>计入</th></tr>
+            </thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+        <div class="preview-dup" id="previewDup" hidden>
+          <p class="dup-cap" id="dupText"></p>
+          <label class="dup-opt"><input type="radio" name="dupMode" value="new" id="dupNew" checked><span>新增为同名课程</span></label>
+          <label class="dup-opt"><input type="radio" name="dupMode" value="overwrite" id="dupOverwrite"><span>覆盖已有同名课程（按节序沿用已看时长）</span></label>
+        </div>
+        <div class="import-actions">
+          <button type="button" class="btn primary" id="confirmImportBtn">确认导入</button>
+          <button type="button" class="btn ghost" id="cancelImportBtn">取消</button>
+        </div>
+      </div>
     </section>
 
     <!-- 课程列表 -->
@@ -92,6 +147,44 @@
       <button class="btn ghost" id="seedBtn">填入示例课程</button>
     </div>
 
+    <!-- 设置：云同步（可选，不填也能正常用） -->
+    <section class="panel reveal" id="syncPanel">
+      <div class="panel-head">
+        <h2>设置 · 云同步</h2>
+        <p class="panel-cap">可选：把进度备份到自己的 Cloudflare D1，多设备用同一同步码互通</p>
+      </div>
+
+      <div class="sync-grid">
+        <label class="field grow">
+          <span>同步码（当作口令，至少 16 位）</span>
+          <div class="secret-wrap">
+            <input type="password" id="syncCode" class="mono" autocomplete="off" spellcheck="false"
+              placeholder="自己定一个至少 16 位的口令，不要外传">
+            <button type="button" class="btn ghost secret-toggle" id="syncCodeToggle" aria-pressed="false">显示</button>
+          </div>
+        </label>
+        <label class="field grow">
+          <span>Worker 地址</span>
+          <input type="url" id="syncBase" class="mono" spellcheck="false"
+            placeholder="https://study-dashboard-sync.xxx.workers.dev">
+        </label>
+      </div>
+
+      <label class="sync-auto">
+        <input type="checkbox" id="syncAuto">
+        <span>每次修改后自动上传（可选）</span>
+      </label>
+
+      <div class="sync-actions">
+        <button type="button" class="btn primary" id="syncUploadBtn">立即上传</button>
+        <button type="button" class="btn ghost" id="syncPullBtn">立即拉取</button>
+        <button type="button" class="btn ghost" id="syncForgetBtn">清除本机同步设置</button>
+      </div>
+
+      <p class="sync-status mono" id="syncStatus" role="status" aria-live="polite">尚未同步</p>
+      <p class="sync-hint">同步码只存在本机；同一同步码可在另一台设备拉取。上传时若云端已被别处改过，会先弹窗让你选择保留哪一份。断网时所有记录仍在本地，不影响使用。</p>
+    </section>
+
     <footer class="foot reveal">
       <p class="foot-note">数据保存在本浏览器中，换设备或清理缓存前请先导出备份。</p>
       <div class="foot-actions">
@@ -102,6 +195,20 @@
       </div>
     </footer>
   </main>
+
+  <!-- 云同步冲突：绝不自动覆盖，必须让用户选 -->
+  <div class="modal" id="syncConflict" hidden>
+    <div class="modal-backdrop" aria-hidden="true"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="conflictTitle">
+      <h3 id="conflictTitle">云端和本机都有更新</h3>
+      <p class="modal-note" id="conflictNote"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn primary" id="conflictTakeRemote">用云端覆盖本地</button>
+        <button type="button" class="btn ghost" id="conflictPushLocal">用本地覆盖云端</button>
+        <button type="button" class="btn ghost" id="conflictCancel">先不处理</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
