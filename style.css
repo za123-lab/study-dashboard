@@ -1,5 +1,5 @@
 /* ==========================================================
-   学习进度手账 — 视觉方向：方格纸学习手账
+   学业工作台 — 视觉方向：方格纸学习手账
    暖米色纸底 / 墨蓝字迹 / 朱红批注
    ========================================================== */
 
@@ -22,11 +22,11 @@
   --grid: rgba(32, 52, 78, 0.055);
   --line: rgba(32, 52, 78, 0.14);
 
-  /* 待办类别配色：学业蓝 / 竞赛红 / 赛事绿 / 其他褐 */
-  --cat-study: #2f5d8a;
-  --cat-contest: #b4552f;
-  --cat-event: #6d7f3b;
-  --cat-other: #80715f;
+  /* 紧急度四档：逾期红 / 24 小时内橙 / 7 天内黄 / 更远或待确认灰蓝 */
+  --u-overdue: #c0453a;
+  --u-soon: #b4741f;
+  --u-week: #a08a2c;
+  --u-far: #6f8398;
   --warn-soon: #b4741f;
   --warn-week: #a08a2c;
 
@@ -708,9 +708,64 @@ input:focus {
   border-top: 1px dotted var(--line);
 }
 
+.l-title-row {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.l-title {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: text;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.l-title.is-fallback {
+  color: var(--ink-faint);
+}
+
+.l-title:hover {
+  color: var(--red-deep);
+  text-decoration: underline dotted;
+}
+
+.l-title-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--red);
+  border-radius: 3px;
+}
+
+.l-title-edit:focus {
+  outline: none;
+  background: rgba(192, 69, 58, 0.05);
+}
+
 .l-idx {
   flex: none;
   width: 26px;
+  padding-top: 1px;
   font-size: 11.5px;
   color: var(--ink-faint);
 }
@@ -1419,6 +1474,11 @@ input:focus {
   border-radius: var(--radius);
 }
 
+.empty.state-box {
+  padding: 48px 24px;
+  border-color: rgba(32, 52, 78, 0.28);
+}
+
 .empty-icon {
   font-size: 40px;
   color: var(--red);
@@ -1451,6 +1511,15 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+}
+
+.foot-brand {
+  flex: 1 1 100%;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
 }
 
 .foot-note {
@@ -1683,6 +1752,25 @@ input:focus {
     padding: 12px 0;
   }
 
+  .l-title-row {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .l-title {
+    min-height: 44px;
+    padding: 6px 0;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .l-title-edit {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
   .l-idx {
     grid-column: 1;
     grid-row: 1;
@@ -1692,12 +1780,12 @@ input:focus {
 
   .l-total {
     grid-column: 2;
-    grid-row: 1;
+    grid-row: 2;
   }
 
   .l-watched {
     grid-column: 3;
-    grid-row: 1;
+    grid-row: 2;
   }
 
   .l-field {
@@ -1722,20 +1810,20 @@ input:focus {
 
   .l-bar {
     grid-column: 1 / span 2;
-    grid-row: 2;
+    grid-row: 3;
     margin: 0;
   }
 
   .l-pct {
     grid-column: 3;
-    grid-row: 2;
+    grid-row: 3;
     width: auto;
     align-self: center;
   }
 
   .l-actions {
     grid-column: 1 / -1;
-    grid-row: 3;
+    grid-row: 4;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -1812,16 +1900,21 @@ input:focus {
 
 .view-tabs {
   display: flex;
-  gap: 4px;
-  margin: 4px 0 30px;
+  justify-content: center;
+  width: min(660px, 100%);
+  margin: 4px auto 30px;
   border-bottom: 1.5px solid var(--line);
 }
 
 .view-tab {
-  padding: 10px 20px 9px;
+  flex: 1 1 0;
+  max-width: 220px;
+  min-height: 44px;
+  padding: 10px 12px 9px;
   font-family: var(--font-serif);
   font-size: 15px;
   letter-spacing: 0.1em;
+  text-align: center;
   color: var(--ink-soft);
   background: transparent;
   border: 1px solid transparent;
@@ -1846,6 +1939,189 @@ input:focus {
 .view-tab:focus-visible {
   outline: 2px solid var(--red);
   outline-offset: -2px;
+}
+
+/* ---------- 首屏「今天要做什么」 ---------- */
+
+.today-panel {
+  margin-bottom: 28px;
+  background: var(--paper-2);
+}
+
+.today-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.today-kicker {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+}
+
+.today-head h2 {
+  margin: 2px 0 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.today-min {
+  flex: 0 0 auto;
+  text-align: right;
+  color: var(--ink-soft);
+}
+
+.today-min b {
+  display: block;
+  font-size: 26px;
+  line-height: 1.1;
+  color: var(--red-deep);
+}
+
+.today-min i {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.today-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.today-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(32, 52, 78, 0.03);
+  border-left: 3px solid var(--u-far);
+  border-radius: var(--radius);
+}
+
+.today-item.u-overdue {
+  border-left-color: var(--u-overdue);
+}
+
+.today-item.u-soon {
+  border-left-color: var(--u-soon);
+}
+
+.today-item.u-week {
+  border-left-color: var(--u-week);
+}
+
+.today-item.is-done {
+  opacity: 0.6;
+}
+
+.state-sym {
+  flex: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.today-item-main {
+  min-width: 0;
+}
+
+.today-item-title {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.today-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.today-empty {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.today-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.today-next {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.today-next b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.today-go {
+  min-height: 44px;
+}
+
+/* ---------- 统一空 / 加载 / 错误态 ---------- */
+
+.state-box {
+  padding: 24px 16px;
+  text-align: center;
+  background: rgba(32, 52, 78, 0.02);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+}
+
+.state-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.state-text {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.state-box[data-kind="error"] {
+  background: rgba(192, 69, 58, 0.04);
+  border-color: rgba(192, 69, 58, 0.35);
+}
+
+.state-box[data-kind="error"] .state-title {
+  color: var(--red-deep);
+}
+
+.state-box[data-kind="loading"] {
+  color: var(--ink-soft);
+}
+
+.state-box.is-compact {
+  padding: 14px 12px;
 }
 
 /* ---------- 待办 ---------- */
@@ -1939,15 +2215,15 @@ input:focus {
 }
 
 .todo-item.u-overdue {
-  border-left-color: var(--red);
+  border-left-color: var(--u-overdue);
 }
 
 .todo-item.u-soon {
-  border-left-color: var(--warn-soon);
+  border-left-color: var(--u-soon);
 }
 
 .todo-item.u-week {
-  border-left-color: var(--warn-week);
+  border-left-color: var(--u-week);
 }
 
 .todo-item.is-done {
@@ -2033,30 +2309,6 @@ input:focus {
   border-radius: 3px;
 }
 
-.todo-cat[data-cat="study"],
-.cal-tag[data-cat="study"] {
-  color: var(--cat-study);
-  border-color: rgba(47, 93, 138, 0.35);
-}
-
-.todo-cat[data-cat="contest"],
-.cal-tag[data-cat="contest"] {
-  color: var(--cat-contest);
-  border-color: rgba(180, 85, 47, 0.35);
-}
-
-.todo-cat[data-cat="event"],
-.cal-tag[data-cat="event"] {
-  color: var(--cat-event);
-  border-color: rgba(109, 127, 59, 0.35);
-}
-
-.todo-cat[data-cat="other"],
-.cal-tag[data-cat="other"] {
-  color: var(--cat-other);
-  border-color: rgba(128, 113, 95, 0.35);
-}
-
 .todo-due.is-overdue {
   color: var(--red-deep);
 }
@@ -2116,42 +2368,29 @@ input:focus {
   background: rgba(192, 69, 58, 0.06);
 }
 
-.todo-empty {
-  margin: 0;
-  padding: 26px 16px;
-  font-size: 13px;
-  line-height: 1.8;
-  color: var(--ink-soft);
-  text-align: center;
-}
-
-/* 类别色点 */
+/* 紧急度色点：红 / 橙 / 黄 / 灰蓝，全站唯一彩色圆点语义 */
 .dot {
   display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--cat-other);
+  background: var(--u-far);
 }
 
-.dot[data-cat="study"] {
-  background: var(--cat-study);
+.dot[data-u="overdue"] {
+  background: var(--u-overdue);
 }
 
-.dot[data-cat="contest"] {
-  background: var(--cat-contest);
+.dot[data-u="soon"] {
+  background: var(--u-soon);
 }
 
-.dot[data-cat="event"] {
-  background: var(--cat-event);
+.dot[data-u="week"] {
+  background: var(--u-week);
 }
 
-.dot[data-cat="other"] {
-  background: var(--cat-other);
-}
-
-.dot.dot-study {
-  background: var(--red);
+.dot[data-u="far"] {
+  background: var(--u-far);
 }
 
 /* ---------- 日历 ---------- */
@@ -2188,7 +2427,15 @@ input:focus {
 
 .cal-month-total {
   font-size: 12px;
-  color: var(--red-deep);
+  color: var(--ink-soft);
+}
+
+.cal-num-overdue {
+  color: var(--u-overdue);
+}
+
+.cal-num-week {
+  color: var(--u-week);
 }
 
 .cal-legend {
@@ -2256,7 +2503,7 @@ input:focus {
 }
 
 .cal-cell.has-due {
-  background: rgba(192, 69, 58, 0.045);
+  background: rgba(32, 52, 78, 0.045);
 }
 
 .cal-cell.is-today {
@@ -2287,7 +2534,7 @@ input:focus {
   margin-top: auto;
   font-size: 10.5px;
   line-height: 1.2;
-  color: var(--red-deep);
+  color: var(--ink-soft);
 }
 
 .cal-list {
@@ -2395,7 +2642,20 @@ input:focus {
   padding: 8px 10px;
   background: rgba(32, 52, 78, 0.03);
   border: 1px solid var(--rule);
+  border-left: 3px solid var(--u-far);
   border-radius: 6px;
+}
+
+.day-todo.u-overdue {
+  border-left-color: var(--u-overdue);
+}
+
+.day-todo.u-soon {
+  border-left-color: var(--u-soon);
+}
+
+.day-todo.u-week {
+  border-left-color: var(--u-week);
 }
 
 .day-todo.is-done {
@@ -2433,6 +2693,30 @@ input:focus {
   padding-top: 2px;
 }
 
+.dt-state .state-sym {
+  display: inline;
+  width: auto;
+  font-size: 11px;
+  line-height: 1;
+  color: inherit;
+}
+
+.dt-state.u-overdue {
+  color: var(--u-overdue);
+}
+
+.dt-state.u-soon {
+  color: var(--u-soon);
+}
+
+.dt-state.u-week {
+  color: var(--u-week);
+}
+
+.dt-state.u-far {
+  color: var(--u-far);
+}
+
 .day-sub-empty {
   margin: 0;
   padding: 10px 12px;
@@ -2452,6 +2736,23 @@ input:focus {
     min-height: 44px;
     padding: 10px 6px;
     font-size: 14px;
+  }
+
+  .today-head h2 {
+    font-size: 18px;
+  }
+
+  .today-min b {
+    font-size: 24px;
+  }
+
+  .today-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .today-go {
+    width: 100%;
   }
 
   .todo-head-actions {
@@ -2526,19 +2827,35 @@ input:focus {
     align-items: center;
     width: 100%;
     min-height: 48px;
-    padding: 8px 6px;
+    padding: 8px 6px 8px 8px;
     font: inherit;
     text-align: left;
     color: var(--ink);
     background: transparent;
     border: 0;
+    border-left: 3px solid transparent;
     border-bottom: 1px dashed var(--line);
     cursor: pointer;
   }
 
+  .cal-row.u-overdue {
+    border-left-color: var(--u-overdue);
+  }
+
+  .cal-row.u-soon {
+    border-left-color: var(--u-soon);
+  }
+
+  .cal-row.u-week {
+    border-left-color: var(--u-week);
+  }
+
+  .cal-row.u-far {
+    border-left-color: var(--u-far);
+  }
+
   .cal-row.is-today {
     background: rgba(192, 69, 58, 0.06);
-    box-shadow: inset 3px 0 0 var(--red);
   }
 
   .cal-row:focus-visible {
@@ -2582,6 +2899,31 @@ input:focus {
     border-radius: 3px;
   }
 
+  .cal-tag.u-overdue {
+    color: var(--u-overdue);
+    border-color: rgba(192, 69, 58, 0.35);
+  }
+
+  .cal-tag.u-soon {
+    color: var(--u-soon);
+    border-color: rgba(180, 116, 31, 0.35);
+  }
+
+  .cal-tag.u-week {
+    color: var(--u-week);
+    border-color: rgba(160, 138, 44, 0.35);
+  }
+
+  .cal-tag.u-far {
+    color: var(--u-far);
+    border-color: rgba(111, 131, 152, 0.35);
+  }
+
+  .cal-row-count {
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+
   .cal-none {
     font-size: 11px;
     color: var(--ink-faint);
@@ -2589,7 +2931,7 @@ input:focus {
 
   .cal-row-min {
     font-size: 11px;
-    color: var(--red-deep);
+    color: var(--ink-soft);
   }
 
   .todo-card {

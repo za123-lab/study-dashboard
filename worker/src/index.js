@@ -1,5 +1,5 @@
 /* ==========================================================
-   学习进度手账 · 云同步 Worker（Cloudflare Workers + D1）
+   学业工作台 · 云同步 Worker（Cloudflare Workers + D1）
    - GET  /bili?bvid=BVxxx   原样透传 B 站 view 接口（带 CORS）
    - GET  /sync/{code}       读取云端进度
    - PUT  /sync/{code}       条件写入，冲突返回 409

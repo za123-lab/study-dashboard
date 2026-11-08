@@ -1,5 +1,5 @@
 -- ==========================================================
--- 学习进度手账 · Supabase 表结构与 RLS
+-- 学业工作台 · Supabase 表结构与 RLS
 -- 用法：Supabase Dashboard → SQL Editor → 整段粘贴执行（可重复执行）
 -- ==========================================================
 
@@ -15,7 +15,7 @@ create table if not exists public.study_state (
   constraint study_state_data_size check (octet_length(data::text) <= 1000000)
 );
 
-comment on table public.study_state is '学习进度手账：每个用户一行，data 为整份进度 JSON';
+comment on table public.study_state is '学业工作台：每个用户一行，data 为整份进度 JSON';
 
 -- 开启行级安全：默认谁也不能读写
 alter table public.study_state enable row level security;

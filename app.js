@@ -1,5 +1,5 @@
 /* ==========================================================
-   学习进度手账 — 纯前端逻辑
+   学业工作台 — 纯前端逻辑
    进度按「分钟」记录，课程与总体进度都用时长加权计算
    数据全部保存在 localStorage，不依赖后端与第三方库
    ========================================================== */
@@ -7,6 +7,8 @@
 (function () {
   "use strict";
 
+  const APP_NAME = "学业工作台"; // 站点名称唯一出处：标题、页脚与导出文件名都引用它
+  const SCHEMA_VERSION = 3; // 数据结构版本：高于本版本的快照不自动上传，避免旧页面覆盖新字段
   const STORE_KEY = "study-log-v1"; // 沿用旧 key，老数据读取后自动迁移
   const SUPA_CFG_KEY = "study-supabase-v1"; // Supabase 连接配置，不随导出的进度文件走
   const SUPA_SESSION_KEY = "study-supabase-session-v1"; // 登录态（access/refresh token）
@@ -33,6 +35,7 @@
    */
 
   let state;
+  let schemaTooNew = false; // 读到更高版本的数据后置真：停止自动上传，提示刷新页面
   let migratedOnLoad = false;
   let toastTimer = null;
   let pendingImport = null; // 已解析、待确认写入的 B 站课程
@@ -65,6 +68,24 @@
   let realtimeLive = false;
   let realtimeBlocked = false; // 订阅被服务端明确拒绝时不再重试
   let pendingEditPull = false; // 用户正在输入课时，把云端更新推迟到输入完成
+
+  // 待办类别与优先级（sanitize 读旧数据时会用到，必须在 state=loadState() 之前初始化）
+  const TODO_CATS = {
+    study: "学业",
+    contest: "竞赛",
+    event: "赛事",
+    other: "其他",
+  };
+  const TODO_PRI = ["P0", "P1", "P2"];
+
+  // 日历与当日弹层用的紧急度四档；待办列表沿用原有三档配色
+  const URGENCY_LABEL = {
+    overdue: "已逾期",
+    soon: "24 小时内",
+    week: "7 天内",
+    far: "7 天以上 / 待确认",
+  };
+  const URGENCY_RANK = { overdue: 0, soon: 1, week: 2, far: 3 };
 
   state = loadState();
 
@@ -214,6 +235,7 @@
     // demoActivity / demoDetails 只记「示例打卡」那部分，方便把示例与真实记录分开清除
     return {
       v: 2,
+      schemaVersion: SCHEMA_VERSION,
       courses: [],
       activity: {},
       demoActivity: {},
@@ -281,6 +303,12 @@
         totalMin: totalMin,
         watchedMin: watchedMin,
       };
+      // 课时标题：B 站导入的分 P 标题或手动填写；旧数据没有这个字段时照常读取
+      if (typeof l.title === "string" && l.title.trim()) {
+        lesson.title = l.title.trim().slice(0, 120);
+      }
+      const page = clampInt(l.page, 1, 9999, 0);
+      if (page) lesson.page = page;
       // 只接受站内视频链接，避免导入数据里混入 javascript: 之类的地址
       if (typeof l.url === "string" && BILI_URL_RE.test(l.url)) {
         lesson.url = l.url;
@@ -347,14 +375,6 @@
     return out;
   }
 
-  const TODO_CATS = {
-    study: "学业",
-    contest: "竞赛",
-    event: "赛事",
-    other: "其他",
-  };
-  const TODO_PRI = ["P0", "P1", "P2"];
-
   /** 待办整理：缺字段、非法值全部兜底；旧版 JSON 没有 todos 时返回空数组 */
   function cleanTodos(raw) {
     if (!Array.isArray(raw)) return [];
@@ -411,6 +431,11 @@
   function sanitize(data) {
     if (!data || typeof data !== "object") return null;
 
+    const incomingVersion = Number(data.schemaVersion);
+    if (Number.isFinite(incomingVersion) && incomingVersion > SCHEMA_VERSION) {
+      schemaTooNew = true;
+    }
+
     const rawCourses = Array.isArray(data.courses) ? data.courses : [];
     const isV1 =
       data.v === 1 ||
@@ -452,6 +477,7 @@
 
     return {
       v: 2,
+      schemaVersion: SCHEMA_VERSION,
       courses: courses,
       activity: activity,
       demoActivity: demoActivity,
@@ -468,6 +494,13 @@
   };
 
   const el = {
+    appTitle: $("#appTitle"),
+    appFoot: $("#appFoot"),
+    todayMin: $("#todayMin"),
+    todayList: $("#todayList"),
+    todayEmpty: $("#todayEmpty"),
+    todayNext: $("#todayNext"),
+    todayGoTodo: $("#todayGoTodo"),
     todayLine: $("#todayLine"),
     streakNum: $("#streakNum"),
     ring: $("#overallRing"),
@@ -497,6 +530,7 @@
     clearBtn: $("#clearBtn"),
     promptText: $("#promptText"),
     copyPromptBtn: $("#copyPromptBtn"),
+    biliPanel: $("#biliPanel"),
     biliJson: $("#biliJson"),
     previewBtn: $("#previewBtn"),
     biliClearBtn: $("#biliClearBtn"),
@@ -551,6 +585,7 @@
     viewStudy: $("#viewStudy"),
     viewTodo: $("#viewTodo"),
     viewCalendar: $("#viewCalendar"),
+    viewTabs: $("#viewTabs"),
     todoSummary: $("#todoSummary"),
     todoCatFilter: $("#todoCatFilter"),
     todoStatusFilter: $("#todoStatusFilter"),
@@ -582,16 +617,40 @@
 
   // ---------- 渲染 ----------
 
+  // 按视图惰性渲染：只构建当前视图的 DOM；隐藏视图下次进入时再补
+  const viewDirty = { study: true, todo: true, calendar: true };
+  const viewScroll = { study: 0, todo: 0, calendar: 0 };
+
+  /** 站点名统一从 APP_NAME 取，改常量即可全局生效 */
+  function applyBranding() {
+    document.title = APP_NAME;
+    if (el.appTitle) el.appTitle.textContent = APP_NAME;
+    if (el.appFoot) el.appFoot.textContent = APP_NAME;
+  }
+
+  function renderView(name) {
+    viewDirty[name] = false;
+    if (name === "study") {
+      renderToday();
+      renderStats();
+      renderCourses();
+      renderHeatmap();
+      renderDemoNotice();
+      renderHeatNote();
+    } else if (name === "todo") {
+      renderTodos();
+    } else if (name === "calendar") {
+      renderCalendar();
+    }
+  }
+
   function renderAll() {
     renderHeader();
-    renderStats();
-    renderCourses();
-    renderHeatmap();
     renderStreak();
-    renderDemoNotice();
-    renderHeatNote();
-    renderTodos();
-    renderCalendar();
+    viewDirty.study = true;
+    viewDirty.todo = true;
+    viewDirty.calendar = true;
+    renderView(currentView);
   }
 
   function renderHeader() {
@@ -605,6 +664,87 @@
       " 日 · " +
       WEEK_CN[now.getDay()] +
       " · 今天也要记一笔";
+  }
+
+  /** 统一的空 / 加载 / 错误态内容，各模块共用同一套文案与样式 */
+  function stateContent(title, text) {
+    return (
+      '<p class="state-title">' +
+      escapeHtml(title) +
+      '</p><p class="state-text">' +
+      escapeHtml(text) +
+      "</p>"
+    );
+  }
+
+  /** 首屏「今天要做什么」：今日学习分钟 + 今日待办 + 最近截止 */
+  function renderToday() {
+    const key = todayKey();
+    const min = state.activity[key] || 0;
+    el.todayMin.textContent = min;
+
+    const allToday = todosOnDay(key);
+    const pendingToday = allToday.filter(function (t) {
+      return !t.done;
+    });
+    // 今天要做什么：先放已逾期的未完成项，再放今天截止的
+    const overdue = (state.todos || [])
+      .filter(function (t) {
+        return !t.done && t.due && todoDeadline(t) < Date.now();
+      })
+      .sort(function (a, b) {
+        return todoDeadline(a) - todoDeadline(b);
+      });
+    const items = overdue.concat(
+      pendingToday.filter(function (t) {
+        return overdue.indexOf(t) < 0;
+      })
+    );
+    const shown = (items.length ? items : allToday).slice(0, 3);
+
+    el.todayList.innerHTML = shown
+      .map(function (t) {
+        const urgency = calUrgency(t);
+        return (
+          '<li class="today-item u-' +
+          urgency +
+          (t.done ? " is-done" : "") +
+          '"><span class="state-sym mono" aria-hidden="true">' +
+          (t.done ? "✓" : "○") +
+          '</span><span class="today-item-main"><span class="today-item-title">' +
+          escapeHtml(t.title) +
+          '</span><span class="today-item-meta"><span class="todo-cat">' +
+          TODO_CATS[t.cat] +
+          '</span><span class="today-item-left">' +
+          escapeHtml(todoDayLeftText(t)) +
+          "</span></span></span></li>"
+        );
+      })
+      .join("");
+
+    el.todayEmpty.hidden = shown.length > 0;
+    if (!shown.length) {
+      el.todayEmpty.textContent = "今天没有待办，挑一门课开始吧。";
+    }
+
+    const now = Date.now();
+    const upcoming = (state.todos || [])
+      .filter(function (t) {
+        return !t.done && t.due && t.due !== key && todoDeadline(t) >= now;
+      })
+      .sort(function (a, b) {
+        return todoDeadline(a) - todoDeadline(b);
+      });
+    const nearest = upcoming[0];
+    el.todayNext.innerHTML = nearest
+      ? "最近截止：<b>" +
+        escapeHtml(nearest.title) +
+        "</b> · " +
+        escapeHtml(todoDayLeftText(nearest)) +
+        ' · <span class="mono">' +
+        escapeHtml(nearest.due.slice(5).replace("-", "/")) +
+        "</span>"
+      : "接下来没有带截止日期的待办。";
   }
 
   function renderStats() {
@@ -724,16 +864,27 @@
       '<button type="button" class="btn ghost add-lesson" data-cid="' +
       course.id +
       '">+ 添加一节</button>' +
-      '<span class="note">时长填 45 或 0:45；导入来的课时会带一个「B 站」链接</span>' +
+      '<span class="note">时长填 45 或 0:45；点课时标题可改名，导入来的课时会带一个「B 站」链接</span>' +
       "</div>" +
       "</article>"
     );
+  }
+
+  function lessonLabel(lesson, idx) {
+    const title = lesson && lesson.title ? String(lesson.title).trim() : "";
+    if (!title) return idx ? "第 " + idx + " 节" : "课时";
+    if (!lesson.page) return title;
+    // 标题里已经带 P 序号（如手动复制了预览里的「P3 ...」）就不再重复加前缀
+    const prefix = new RegExp("^P" + lesson.page + "(?:\\s|$)", "i");
+    return prefix.test(title) ? title : "P" + lesson.page + " " + title;
   }
 
   function lessonRowHtml(course, lesson, idx) {
     const pct = lessonPct(lesson);
     const done = lesson.totalMin > 0 && lesson.watchedMin >= lesson.totalMin;
     const noTotal = lesson.totalMin === 0;
+    const label = lessonLabel(lesson, idx + 1);
+    const hasTitle = !!(lesson.title && String(lesson.title).trim());
 
     const totalVal = lesson.totalMin ? fmtDur(lesson.totalMin) : "";
     const watchedVal = lesson.watchedMin
@@ -750,8 +901,24 @@
       '" data-lid="' +
       lesson.id +
       '">' +
+      '<span class="l-title-row">' +
       '<span class="l-idx mono">' +
       (idx + 1) +
+      "</span>" +
+      '<button type="button" class="l-title' +
+      (hasTitle ? "" : " is-fallback") +
+      '" data-act="title" title="点击编辑课时标题" aria-label="编辑第 ' +
+      (idx + 1) +
+      " 节标题\">" +
+      escapeHtml(label) +
+      "</button>" +
+      '<input class="l-title-edit" type="text" data-k="title" value="' +
+      escapeHtml(lesson.title || "") +
+      '" maxlength="120" placeholder="第 ' +
+      (idx + 1) +
+      ' 节（可留空）" aria-label="第 ' +
+      (idx + 1) +
+      ' 节标题" hidden>' +
       "</span>" +
       '<label class="l-field l-total"><span>总时长</span>' +
       '<input class="l-input mono" data-k="total" value="' +
@@ -895,14 +1062,14 @@
 
     return {
       courseName: name,
-      lessonName: idx ? "第 " + idx + " 节" : "课时",
+      lessonName: lesson ? lessonLabel(lesson, idx) : idx ? "第 " + idx + " 节" : "课时",
       progress: progress,
     };
   }
 
   let dayReturnFocus = null;
 
-  /** 某一天的待办（按截止时间与优先级排） */
+  /** 某一天的待办：逾期排最前，再按紧急度、截止时刻与优先级排 */
   function todosOnDay(key) {
     return (state.todos || [])
       .filter(function (t) {
@@ -910,6 +1077,12 @@
       })
       .sort(function (a, b) {
         if (a.done !== b.done) return a.done ? 1 : -1;
+        const ra = URGENCY_RANK[calUrgency(a)];
+        const rb = URGENCY_RANK[calUrgency(b)];
+        if (ra !== rb) return ra - rb;
+        const da = todoDeadline(a);
+        const db = todoDeadline(b);
+        if (da != null && db != null && da !== db) return da - db;
         return TODO_PRI.indexOf(a.pri) - TODO_PRI.indexOf(b.pri);
       });
   }
@@ -979,34 +1152,40 @@
       el.dayDemo.hidden = true;
       if (min) {
         parts.push(
-          '<p class="day-empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>'
+          '<p class="state-box is-compact" data-kind="empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>'
         );
       } else if (dayTodos.length) {
-        parts.push('<p class="day-sub-empty">这天没有学习记录。</p>');
+        parts.push('<p class="state-box is-compact" data-kind="empty">这天没有学习记录。</p>');
       }
     }
 
     if (dayTodos.length) {
       parts.push(
-        '<h4 class="day-h">当天待办 · ' + dayTodos.length + " 项</h4>",
+        '<h4 class="day-h">当天待办 · ' + dayTodos.length + " 项（按紧急度排序）</h4>",
         '<ul class="day-todo-list">' +
           dayTodos
             .map(function (t) {
+              const urgency = calUrgency(t);
               return (
-                '<li class="day-todo' +
+                '<li class="day-todo u-' +
+                urgency +
                 (t.done ? " is-done" : "") +
-                '"><i class="dot" data-cat="' +
-                escapeHtml(t.cat) +
+                '"><i class="dot" data-u="' +
+                urgency +
                 '"></i>' +
                 '<span class="dt-main"><span class="dt-title">' +
                 escapeHtml(t.title) +
-                '</span><span class="dt-meta">' +
+                '</span><span class="dt-meta"><span class="dt-cat">' +
                 TODO_CATS[t.cat] +
-                " · " +
+                "</span> · " +
                 t.pri +
                 (t.dueTime ? " · " + escapeHtml(t.dueTime) : "") +
-                '</span></span><span class="dt-state">' +
-                (t.done ? "已完成" : "未完成") +
+                '</span></span><span class="dt-state u-' +
+                urgency +
+                '"><span class="state-sym mono" aria-hidden="true">' +
+                (t.done ? "✓" : "○") +
+                "</span> " +
+                escapeHtml(todoDayLeftText(t)) +
                 "</span></li>"
               );
             })
@@ -1014,12 +1193,12 @@
           "</ul>"
       );
     } else if (forceOpen) {
-      parts.push('<p class="day-sub-empty">这天没有待办安排。</p>');
+      parts.push('<p class="state-box is-compact" data-kind="empty">这天没有待办安排。</p>');
     }
 
     if (!items.length && !min && !dayTodos.length) {
       el.dayBody.innerHTML =
-        '<p class="day-empty">这天没有安排，也没有学习记录。</p>';
+        '<p class="state-box is-compact" data-kind="empty">这天没有安排，也没有学习记录。</p>';
     } else {
       el.dayBody.innerHTML = parts.join("");
     }
@@ -1106,6 +1285,26 @@
     return "还剩 " + Math.ceil(hours / 24) + " 天";
   }
 
+  /**
+   * 日历四档：逾期 / 24 小时内 / 7 天内 / 其他（7 天以上、无截止、已完成）。
+   * 阈值与 todoUrgency 完全一致，只是把「>7 天与无截止」并成灰蓝一档。
+   */
+  function calUrgency(t) {
+    const u = todoUrgency(t);
+    if (u === "overdue" || u === "soon" || u === "week") return u;
+    return "far";
+  }
+
+  /** 当日弹层里的剩余时间：统一按天说，逾期显示「已逾期 X 天」 */
+  function todoDayLeftText(t) {
+    if (t.done) return "已完成";
+    const dl = todoDeadline(t);
+    if (dl == null) return "截止待确认";
+    const diff = dl - Date.now();
+    if (diff < 0) return "已逾期 " + Math.max(1, Math.ceil(-diff / 86400000)) + " 天";
+    return "还有 " + Math.max(1, Math.ceil(diff / 86400000)) + " 天";
+  }
+
   function sortedTodos() {
     return (state.todos || []).slice().sort(function (a, b) {
       if (a.done !== b.done) return a.done ? 1 : -1;
@@ -1166,9 +1365,9 @@
     if (!filtered.length) {
       el.todoList.innerHTML = "";
       el.todoEmpty.hidden = false;
-      el.todoEmpty.textContent = (state.todos || []).length
-        ? "这里还没有符合条件的待办，换个筛选条件看看。"
-        : "清单还空着。可以点「导入当前待办」一次性写入，也可以自己加一条。";
+      el.todoEmpty.innerHTML = (state.todos || []).length
+        ? stateContent("没有符合条件的待办", "换个类别或状态筛选看看。")
+        : stateContent("清单还空着", "点「导入当前待办」一次性写入，或自己加一条。");
       return;
     }
     el.todoEmpty.hidden = true;
@@ -1230,18 +1429,22 @@
 
   // ---------- 日历 ----------
 
-  function calDayAria(key, cats, min) {
+  function calDayAria(key, todos, min) {
     const p = key.split("-");
     const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
     const bits = [Number(p[1]) + " 月 " + Number(p[2]) + " 日 " + WEEK_CN[d.getDay()]];
-    if (cats.length) {
-      bits.push(
-        cats
-          .map(function (c) {
-            return TODO_CATS[c];
-          })
-          .join("、") + " 类待办"
-      );
+    const pending = todos.filter(function (t) {
+      return !t.done;
+    });
+    if (pending.length) {
+      let top = "far";
+      pending.forEach(function (t) {
+        const u = calUrgency(t);
+        if (URGENCY_RANK[u] < URGENCY_RANK[top]) top = u;
+      });
+      bits.push(pending.length + " 项未完成待办，最紧急：" + URGENCY_LABEL[top]);
+    } else if (todos.length) {
+      bits.push("待办均已完成");
     } else {
       bits.push("没有待办");
     }
@@ -1257,23 +1460,31 @@
     const startPad = first.getDay();
     const today = todayKey();
     const prefix = y + "-" + pad(m + 1);
+    const now = Date.now();
+    const weekEnd = dateKey(addDays(new Date(), 6 - new Date().getDay()));
 
     el.calMonth.textContent = y + " 年 " + (m + 1) + " 月";
 
-    let monthCount = 0;
+    let monthOverdue = 0;
+    let weekDue = 0;
     (state.todos || []).forEach(function (t) {
-      if (!t.done && t.due && t.due.slice(0, 7) === prefix) monthCount++;
+      if (t.done || !t.due) return;
+      const dl = todoDeadline(t);
+      if (t.due.slice(0, 7) === prefix && dl != null && dl < now) monthOverdue++;
+      if (t.due >= today && t.due <= weekEnd) weekDue++;
     });
-    el.calMonthTotal.textContent = monthCount
-      ? "本月截止 " + monthCount + " 项（未完成）"
-      : "本月没有截止项";
+    el.calMonthTotal.innerHTML =
+      '本月逾期 <b class="mono cal-num-overdue">' +
+      monthOverdue +
+      '</b> · 本周截止 <b class="mono cal-num-week">' +
+      weekDue +
+      "</b>";
 
-    // 每天涉及的待办类别（去重）
-    const dayCats = {};
+    // 每天的待办清单：日期格只取最紧急的一项决定颜色
+    const dayTodos = {};
     (state.todos || []).forEach(function (t) {
       if (!t.due) return;
-      const list = dayCats[t.due] || (dayCats[t.due] = []);
-      if (list.indexOf(t.cat) < 0) list.push(t.cat);
+      (dayTodos[t.due] || (dayTodos[t.due] = [])).push(t);
     });
 
     let grid = "";
@@ -1283,25 +1494,28 @@
     let listHtml = "";
     for (let d = 1; d <= days; d++) {
       const key = prefix + "-" + pad(d);
-      const cats = dayCats[key] || [];
+      const todos = dayTodos[key] || [];
       const min = state.activity[key] || 0;
       const weekday = WEEK_CN[new Date(y, m, d).getDay()];
-      const dots =
-        cats
-          .map(function (c) {
-            return '<i class="dot" data-cat="' + c + '"></i>';
-          })
-          .join("") + (min ? '<i class="dot dot-study"></i>' : "");
+      let top = "";
+      todos.forEach(function (t) {
+        const u = calUrgency(t);
+        if (!top || URGENCY_RANK[u] < URGENCY_RANK[top]) top = u;
+      });
+      const pending = todos.filter(function (t) {
+        return !t.done;
+      }).length;
+      const dots = top ? '<i class="dot" data-u="' + top + '"></i>' : "";
 
       grid +=
         '<button type="button" class="cal-cell' +
         (key === today ? " is-today" : "") +
-        (cats.length ? " has-due" : "") +
+        (todos.length ? " has-due" : "") +
         (min ? " has-study" : "") +
         '" data-cal-date="' +
         key +
         '" aria-label="' +
-        escapeHtml(calDayAria(key, cats, min)) +
+        escapeHtml(calDayAria(key, todos, min)) +
         '">' +
         '<span class="cal-day-num mono">' +
         d +
@@ -1312,15 +1526,16 @@
         (min ? '<span class="cal-min mono">' + min + "′</span>" : "") +
         "</button>";
 
-      // 手机列表视图：每天一行，避免七列挤成豆腐块
+      // 手机列表视图：每天一行，左侧按最紧急一档着色，类别信息留到弹层里
       listHtml +=
         '<button type="button" class="cal-row' +
         (key === today ? " is-today" : "") +
-        (cats.length || min ? " has-any" : "") +
+        (top ? " u-" + top : "") +
+        (todos.length || min ? " has-any" : "") +
         '" data-cal-date="' +
         key +
         '" aria-label="' +
-        escapeHtml(calDayAria(key, cats, min)) +
+        escapeHtml(calDayAria(key, todos, min)) +
         '">' +
         '<span class="cal-row-day"><b class="mono">' +
         d +
@@ -1328,12 +1543,14 @@
         weekday.replace("星期", "周") +
         "</i></span>" +
         '<span class="cal-row-main">' +
-        (cats.length
-          ? cats
-              .map(function (c) {
-                return '<span class="cal-tag" data-cat="' + c + '">' + TODO_CATS[c] + "</span>";
-              })
-              .join("")
+        (todos.length
+          ? '<span class="cal-tag u-' +
+            top +
+            '">' +
+            URGENCY_LABEL[top] +
+            '</span><span class="cal-row-count mono">' +
+            (pending ? pending + " 项未完成" : "已完成") +
+            "</span>"
           : '<span class="cal-none">没有待办</span>') +
         "</span>" +
         '<span class="cal-row-min mono">' +
@@ -1359,6 +1576,9 @@
   // ---------- 视图切换 ----------
 
   function setView(name) {
+    if (!viewDirty[name] && name === currentView) return;
+    const prev = currentView;
+    if (prev !== name) viewScroll[prev] = window.scrollY || 0;
     currentView = name;
     const views = {
       study: el.viewStudy,
@@ -1375,9 +1595,39 @@
       views[k].hidden = !on;
       tabs[k].classList.toggle("is-active", on);
       tabs[k].setAttribute("aria-selected", on ? "true" : "false");
+      tabs[k].tabIndex = on ? 0 : -1;
     });
-    if (name === "todo") renderTodos();
-    if (name === "calendar") renderCalendar();
+    // B 站导入面板只属于学习视图；隐藏时保留内容与预览状态
+    if (el.biliPanel) el.biliPanel.hidden = name !== "study";
+    if (viewDirty[name]) renderView(name);
+    if (prev !== name) {
+      const target = viewScroll[name] || 0;
+      requestAnimationFrame(function () {
+        window.scrollTo(0, target);
+      });
+    }
+  }
+
+  function bindTabKeys() {
+    const order = ["study", "todo", "calendar"];
+    const tabs = {
+      study: el.tabStudy,
+      todo: el.tabTodo,
+      calendar: el.tabCalendar,
+    };
+    el.viewTabs.addEventListener("keydown", function (e) {
+      const idx = order.indexOf(currentView);
+      let next = -1;
+      if (e.key === "ArrowRight") next = (idx + 1) % order.length;
+      else if (e.key === "ArrowLeft") next = (idx + order.length - 1) % order.length;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = order.length - 1;
+      if (next < 0) return;
+      e.preventDefault();
+      const name = order[next];
+      setView(name);
+      tabs[name].focus();
+    });
   }
 
   // ---------- 待办编辑 ----------
@@ -1812,7 +2062,35 @@
     openIds.add(courseId);
     saveState();
     renderAll();
-    toast("已添加第 " + course.lessons.length + " 节");
+    toast("已添加第 " + course.lessons.length + " 节，点标题可以填名字");
+  }
+
+  /** 点课时标题 → 原地切换成输入框 */
+  function openLessonTitleEditor(btn) {
+    const row = btn.closest(".lesson");
+    if (!row) return;
+    const input = row.querySelector(".l-title-edit");
+    if (!input) return;
+    btn.hidden = true;
+    input.hidden = false;
+    input.focus();
+    input.select();
+  }
+
+  function commitLessonTitle(courseId, lessonId, raw) {
+    const course = findCourse(courseId);
+    const lesson = course ? findLesson(course, lessonId) : null;
+    if (!lesson) return;
+    const next = String(raw == null ? "" : raw).trim().slice(0, 120);
+    if ((lesson.title || "") === next) {
+      renderCourses();
+      return;
+    }
+    if (next) lesson.title = next;
+    else delete lesson.title;
+    saveState();
+    renderAll();
+    toast(next ? "已保存课时标题" : "已清空标题，回退为「第 N 节」");
   }
 
   // ---------- B 站：提示词 + JSON 导入 ----------
@@ -2228,7 +2506,14 @@
     const overwrite = !!(dup && el.dupOverwrite.checked);
 
     const lessons = p.lessons.map(function (l) {
-      return { id: makeId(), totalMin: l.totalMin, watchedMin: 0, url: l.url };
+      return {
+        id: makeId(),
+        title: String(l.title || "").trim().slice(0, 120),
+        page: l.page,
+        totalMin: l.totalMin,
+        watchedMin: 0,
+        url: l.url,
+      };
     });
 
     if (overwrite) {
@@ -2422,6 +2707,7 @@
   function snapshot() {
     return {
       v: 2,
+      schemaVersion: SCHEMA_VERSION,
       courses: state.courses,
       activity: state.activity,
       demoActivity: state.demoActivity || {},
@@ -2635,6 +2921,20 @@
     };
   }
 
+  function remoteSchemaTooNew(remote) {
+    const ver = Number(remote && remote.data && remote.data.schemaVersion);
+    return Number.isFinite(ver) && ver > SCHEMA_VERSION;
+  }
+
+  function blockNewerSchema() {
+    schemaTooNew = true;
+    setSyncStatus(
+      "error",
+      "数据来自更新版本的页面，自动上传已停止；请刷新页面后再操作"
+    );
+    setLiveStatus("hold", "检测到更高版本的数据，自动同步已暂停；请刷新页面");
+  }
+
   function uploadTooBig() {
     const size = JSON.stringify(snapshot()).length;
     if (size > 900000) {
@@ -2755,8 +3055,29 @@
     }
   }
 
-  /** 真正写云端；调用方负责 supaBusy 与状态提示 */
+  /** 真正写云端；上传前先比对最新 rev，调用方负责 supaBusy 与状态提示 */
   async function uploadSnapshot(baseRev) {
+    if (schemaTooNew) {
+      blockNewerSchema();
+      return false;
+    }
+    const latest = await fetchRemote();
+    if (latest && remoteSchemaTooNew(latest)) {
+      blockNewerSchema();
+      return false;
+    }
+    if (latest && latest.rev !== baseRev) {
+      showConflict(latest, "上传前发现云端已更新");
+      return false;
+    }
+    if (!latest && baseRev) {
+      // 云端那一行被删了，按首次上传重建
+      baseRev = 0;
+      supaMeta.baseRev = 0;
+      supaMeta.syncedHash = "";
+      saveSupaMeta();
+    }
+
     let result;
     if (!baseRev) {
       result = await insertRemote();
@@ -2807,6 +3128,10 @@
       return false;
     }
     if (supaBusy) return false;
+    if (schemaTooNew) {
+      blockNewerSchema();
+      return false;
+    }
     if (uploadTooBig()) return false;
 
     supaBusy = true;
@@ -2844,6 +3169,11 @@
       }
 
       const remote = await fetchRemote();
+      if (remote && remoteSchemaTooNew(remote)) {
+        blockNewerSchema();
+        supaReady = true;
+        return;
+      }
       if (!remote) {
         if (!hasLocalData()) {
           supaMeta.syncedHash = hashState(snapshot());
@@ -2915,6 +3245,10 @@
     setSyncStatus("busy", "正在检查云端…");
     try {
       const remote = await fetchRemote();
+      if (remote && remoteSchemaTooNew(remote)) {
+        blockNewerSchema();
+        return;
+      }
       if (remote && remote.rev !== supaMeta.baseRev) {
         showConflict(remote, "上传前发现云端已更新");
         return;
@@ -2965,6 +3299,10 @@
     setSyncStatus("busy", "正在拉取云端…");
     try {
       const remote = await fetchRemote();
+      if (remote && remoteSchemaTooNew(remote)) {
+        blockNewerSchema();
+        return;
+      }
       if (!remote) {
         setSyncStatus("error", "云端还没有数据：先在这台设备上传一次");
         toast("云端还没有数据");
@@ -3337,6 +3675,7 @@
   /** 自动拉取的判定：本地干净才应用云端；本地有改动则先推，推不上去就弹冲突 */
   async function runAutoPull(reason) {
     if (!supaSession || !supaReady || pendingConflict) return;
+    if (schemaTooNew) return;
     if (supaBusy) {
       pullQueued = true;
       return;
@@ -3361,6 +3700,10 @@
     }
 
     if (!supaSession) return; // 拉取期间退出了登录，不再动本机数据
+    if (remote && remoteSchemaTooNew(remote)) {
+      blockNewerSchema();
+      return;
+    }
 
     const clean = !localDirty();
     const base = supaMeta.baseRev;
@@ -3652,6 +3995,10 @@
     if (!supaCfg || suppressAutoSync || !supaSession || !supaCfg.auto || !supaReady) {
       return;
     }
+    if (schemaTooNew) {
+      setSyncStatus("error", "数据来自更新版本的页面，自动上传已停止；请刷新页面");
+      return;
+    }
     if (pendingConflict) return; // 冲突没解决前不再自动上传
     if (!isOnline()) {
       setSyncStatus("error", "离线：改动已保存在本机，联网后自动同步");
@@ -3852,6 +4199,12 @@
     setView("calendar");
   });
 
+  bindTabKeys();
+  el.todayGoTodo.addEventListener("click", function () {
+    setView("todo");
+    el.tabTodo.focus();
+  });
+
   el.todoAddBtn.addEventListener("click", function () {
     openTodoEditor(null);
   });
@@ -4035,6 +4388,12 @@
       return;
     }
 
+    const titleBtn = e.target.closest(".l-title");
+    if (titleBtn) {
+      openLessonTitleEditor(titleBtn);
+      return;
+    }
+
     const action = e.target.closest(".mini[data-act], .l-del[data-act]");
     if (action) {
       const row = action.closest(".lesson");
@@ -4046,6 +4405,12 @@
 
   // 输入框失焦 / 回车时提交
   el.courseList.addEventListener("change", function (e) {
+    const titleInput = e.target.closest(".l-title-edit");
+    if (titleInput) {
+      const row = titleInput.closest(".lesson");
+      commitLessonTitle(row.dataset.cid, row.dataset.lid, titleInput.value);
+      return;
+    }
     const input = e.target.closest(".l-input");
     if (!input) return;
     const row = input.closest(".lesson");
@@ -4053,6 +4418,17 @@
   });
 
   el.courseList.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== "Escape") return;
+    const titleInput = e.target.closest(".l-title-edit");
+    if (titleInput) {
+      e.preventDefault();
+      if (e.key === "Escape") {
+        renderCourses();
+      } else {
+        titleInput.blur();
+      }
+      return;
+    }
     if (e.key !== "Enter") return;
     const input = e.target.closest(".l-input");
     if (!input) return;
@@ -4297,6 +4673,7 @@
     const payload = JSON.stringify(
       {
         v: 2,
+        schemaVersion: SCHEMA_VERSION,
         exportedAt: new Date().toISOString(),
         courses: state.courses,
         activity: state.activity,
@@ -4312,7 +4689,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "学习进度-" + todayKey() + ".json";
+    a.download = APP_NAME + "-" + todayKey() + ".json";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -4407,10 +4784,16 @@
 
   // ---------- 启动 ----------
 
+  applyBranding();
   el.promptText.textContent = BILI_PROMPT;
   initSupa();
 
   renderAll();
+
+  if (schemaTooNew) {
+    setSyncStatus("error", "本机数据来自更新版本的页面，自动上传已停止；请刷新页面");
+    setLiveStatus("hold", "数据版本高于当前页面，自动同步已暂停；请刷新页面");
+  }
 
   if (migratedOnLoad) {
     saveState(); // 迁移结果立刻落盘，v2 结构只迁移一次
@@ -4420,7 +4803,10 @@
   let resizeTimer = null;
   window.addEventListener("resize", function () {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(renderHeatmap, 200);
+    resizeTimer = setTimeout(function () {
+      if (currentView === "study") renderHeatmap();
+      else viewDirty.study = true;
+    }, 200);
   });
 
   document.documentElement.setAttribute("data-app-ready", "1");

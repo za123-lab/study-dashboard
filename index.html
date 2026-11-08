@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
-  <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css?v=20261108-6">
+  <meta name="description" content="个人学业工作台：记录课程学习、待办清单与日程安排">
+  <title>学业工作台</title>
+  <link rel="stylesheet" href="style.css?v=20261108-7">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -14,8 +14,8 @@
   <main class="wrap">
     <header class="masthead reveal">
       <div>
-        <p class="kicker mono">STUDY LOG · 学习记录</p>
-        <h1>学习进度手账</h1>
+        <p class="kicker mono">STUDY HUB · 学业 · 待办 · 日程</p>
+        <h1 id="appTitle">学业工作台</h1>
         <p class="sub" id="todayLine">——</p>
       </div>
       <div class="stamp" id="streakStamp" title="连续打卡天数">
@@ -25,13 +25,30 @@
     </header>
 
     <!-- 三视图切换：默认仍是学习 -->
-    <nav class="view-tabs reveal" role="tablist" aria-label="视图切换">
-      <button type="button" class="view-tab is-active" role="tab" id="tabStudy" aria-selected="true" aria-controls="viewStudy">学习</button>
-      <button type="button" class="view-tab" role="tab" id="tabTodo" aria-selected="false" aria-controls="viewTodo">待办</button>
-      <button type="button" class="view-tab" role="tab" id="tabCalendar" aria-selected="false" aria-controls="viewCalendar">日历</button>
+    <nav class="view-tabs reveal" id="viewTabs" role="tablist" aria-label="视图切换">
+      <button type="button" class="view-tab is-active" role="tab" id="tabStudy" aria-selected="true" aria-controls="viewStudy" tabindex="0">学习</button>
+      <button type="button" class="view-tab" role="tab" id="tabTodo" aria-selected="false" aria-controls="viewTodo" tabindex="-1">待办</button>
+      <button type="button" class="view-tab" role="tab" id="tabCalendar" aria-selected="false" aria-controls="viewCalendar" tabindex="-1">日历</button>
     </nav>
 
     <div class="view" id="viewStudy" role="tabpanel" aria-labelledby="tabStudy">
+    <!-- 首屏：今天要做什么 -->
+    <section class="panel today-panel reveal" id="todayPanel" aria-labelledby="todayTitle">
+      <div class="today-head">
+        <div>
+          <p class="today-kicker mono">TODAY</p>
+          <h2 id="todayTitle">今天要做什么</h2>
+        </div>
+        <span class="today-min"><b class="mono" id="todayMin">0</b><i>分钟</i></span>
+      </div>
+      <ul class="today-list" id="todayList"></ul>
+      <p class="today-empty" id="todayEmpty" hidden></p>
+      <div class="today-foot">
+        <p class="today-next" id="todayNext"></p>
+        <button type="button" class="btn ghost today-go" id="todayGoTodo">去待办 →</button>
+      </div>
+    </section>
+
     <!-- 总览统计 -->
     <section class="stats reveal" aria-label="总体进度">
       <div class="ring-card">
@@ -108,7 +125,7 @@
     </div>
 
     <!-- 空状态 -->
-    <div class="empty" id="emptyState" hidden>
+    <div class="empty state-box" id="emptyState" data-kind="empty" hidden>
       <div class="empty-icon" aria-hidden="true">✎</div>
       <h3>本子还是空的</h3>
       <p>在上方登记第一门课程，或者先看看示例效果：</p>
@@ -154,7 +171,7 @@
         </div>
 
         <ul class="todo-list" id="todoList"></ul>
-        <p class="todo-empty" id="todoEmpty" hidden></p>
+        <div class="todo-empty state-box" id="todoEmpty" data-kind="empty" hidden></div>
       </section>
     </div><!-- /viewTodo -->
 
@@ -178,12 +195,11 @@
           <span class="cal-month-total mono" id="calMonthTotal"></span>
         </div>
 
-        <div class="cal-legend" aria-label="图例">
-          <span class="cal-legend-item"><i class="dot" data-cat="study"></i>学业</span>
-          <span class="cal-legend-item"><i class="dot" data-cat="contest"></i>竞赛</span>
-          <span class="cal-legend-item"><i class="dot" data-cat="event"></i>赛事</span>
-          <span class="cal-legend-item"><i class="dot" data-cat="other"></i>其他</span>
-          <span class="cal-legend-item"><i class="dot dot-study"></i>学习分钟</span>
+        <div class="cal-legend" aria-label="紧急度图例">
+          <span class="cal-legend-item"><i class="dot" data-u="overdue"></i>已逾期</span>
+          <span class="cal-legend-item"><i class="dot" data-u="soon"></i>24 小时内</span>
+          <span class="cal-legend-item"><i class="dot" data-u="week"></i>7 天内</span>
+          <span class="cal-legend-item"><i class="dot" data-u="far"></i>7 天以上 / 待确认</span>
         </div>
 
         <div class="cal-frame">
@@ -267,7 +283,7 @@
     </section>
 
     <!-- B 站课程导入：提示词 → AI 输出 JSON → 预览 → 写入（放在最后，不打断主流程） -->
-    <section class="panel reveal">
+    <section class="panel reveal" id="biliPanel">
       <div class="panel-head">
         <h2>B 站课程导入</h2>
         <p class="panel-cap">让 AI 把分 P 时长整理成 JSON，粘贴进来一次建好整门课</p>
@@ -318,6 +334,7 @@
     </section>
 
     <footer class="foot reveal">
+      <p class="foot-brand mono"><span id="appFoot">学业工作台</span> · 学业 / 待办 / 日程</p>
       <p class="foot-note">数据默认保存在本浏览器中；登录云同步后还会备份到 Supabase。换设备或清理缓存前建议先导出备份。</p>
       <div class="foot-actions">
         <div class="foot-group">
@@ -428,7 +445,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-6"></script>
+  <script src="app.js?v=20261108-7"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {

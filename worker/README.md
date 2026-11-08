@@ -2,7 +2,7 @@
 
 > 页面已改用 Supabase 云同步（见 [`../supabase/README.md`](../supabase/README.md)），本目录仅作历史参考，页面不再请求此 Worker。
 
-学习进度手账的可选附加能力：把整份进度 JSON 备份到 Cloudflare D1，多设备用同一个「同步码」互通。
+学业工作台的可选附加能力：把整份进度 JSON 备份到 Cloudflare D1，多设备用同一个「同步码」互通。
 不部署这个 Worker 时，站点完全照常可用（localStorage 仍是本地主存储）。
 
 ## 文件
