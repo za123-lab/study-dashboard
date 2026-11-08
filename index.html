@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
   <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css?v=20261108-4">
+  <link rel="stylesheet" href="style.css?v=20261108-5">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -52,9 +52,9 @@
     <section class="panel reveal">
       <div class="panel-head">
         <h2>学习日历</h2>
-        <p class="panel-cap">颜色深浅代表当天累计看了多少分钟</p>
+        <p class="panel-cap">颜色深浅代表当天累计看了多少分钟；点有记录的日期，看当天具体看了哪几节</p>
       </div>
-      <div id="heatmap" class="heatmap" aria-label="学习打卡热力图"></div>
+      <div id="heatmap" class="heatmap" aria-label="学习打卡热力图，有记录的日期可打开当日明细"></div>
       <div class="heat-legend">
         <span>少</span>
         <i class="cell l0"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i><i class="cell l4"></i>
@@ -263,10 +263,25 @@
     </div>
   </div>
 
+  <!-- 当日学习详情：点热力图上的某一天打开 -->
+  <div class="modal" id="dayDetail" hidden>
+    <div class="modal-backdrop" aria-hidden="true" data-day-close></div>
+    <div class="modal-card day-card" role="dialog" aria-modal="true" aria-labelledby="dayTitle">
+      <button type="button" class="day-close" id="dayClose" aria-label="关闭当日学习详情" title="关闭（Esc）">×</button>
+      <h3 id="dayTitle">—</h3>
+      <p class="day-total mono" id="dayTotal"></p>
+      <p class="day-demo" id="dayDemo" hidden></p>
+      <div class="day-body" id="dayBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="dayCloseBtn">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-4"></script>
+  <script src="app.js?v=20261108-5"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {

@@ -23,7 +23,9 @@
    * {
    *   v: 2,
    *   courses: [{ id, name, lessons: [{ id, totalMin, watchedMin }] }],
-   *   activity: { "2026-11-07": 43 }   // 当天累计观看的分钟数
+   *   activity: { "2026-11-07": 43 },   // 当天累计观看的分钟数（统计卡与热力图只认它）
+   *   details: { "2026-11-07": [{ cid, lid, idx, min, at }] }, // 当日明细，与 activity 并存
+   *   demoActivity: { ... }, demoDetails: { ... } // 示例数据单独存，便于整份清除
    * }
    *
    * 旧结构（v1）：
@@ -209,8 +211,15 @@
   // ---------- 读取 / 迁移 / 保存 ----------
 
   function emptyState() {
-    // demoActivity 只记「示例打卡」那部分分钟数，方便把示例与真实记录分开清除
-    return { v: 2, courses: [], activity: {}, demoActivity: {} };
+    // demoActivity / demoDetails 只记「示例打卡」那部分，方便把示例与真实记录分开清除
+    return {
+      v: 2,
+      courses: [],
+      activity: {},
+      demoActivity: {},
+      details: {},
+      demoDetails: {},
+    };
   }
 
   function loadState() {
@@ -296,6 +305,47 @@
     return course;
   }
 
+  /**
+   * 明细数据整理：{ "YYYY-MM-DD": [{ cid, lid, idx, min, at }] }
+   * 同一天同一课时合并累加（导入外部数据也可能重复），非法条目直接丢掉。
+   * 旧版 JSON 没有这个字段时返回空对象，不报错。
+   */
+  function cleanDetails(raw) {
+    const out = {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+    Object.keys(raw).forEach(function (k) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+      const items = Array.isArray(raw[k]) ? raw[k] : [];
+      const merged = [];
+      const seen = {};
+      items.forEach(function (item) {
+        if (!item || typeof item !== "object") return;
+        const cid = typeof item.cid === "string" ? item.cid.slice(0, 80) : "";
+        const lid = typeof item.lid === "string" ? item.lid.slice(0, 80) : "";
+        const min = clampInt(item.min, 1, 99999, 0);
+        if (!cid || !lid || min <= 0) return;
+        const idx = clampInt(item.idx, 1, 9999, 0);
+        const at = Number(item.at) > 0 ? Math.min(Number(item.at), 4102444800000) : 0;
+        const sig = cid + "|" + lid;
+        if (seen[sig] != null) {
+          const prev = merged[seen[sig]];
+          prev.min = Math.min(99999, prev.min + min);
+          if (at && at > (prev.at || 0)) prev.at = at;
+          if (!prev.idx && idx) prev.idx = idx;
+          return;
+        }
+        seen[sig] = merged.length;
+        const entry = { cid: cid, lid: lid };
+        if (idx) entry.idx = idx;
+        entry.min = min;
+        if (at) entry.at = at;
+        merged.push(entry);
+      });
+      if (merged.length) out[k] = merged;
+    });
+    return out;
+  }
+
   /** 把外部数据（本地存储或导入的 JSON）整理成可信结构，非法则返回 null */
   function sanitize(data) {
     if (!data || typeof data !== "object") return null;
@@ -339,7 +389,14 @@
       if (value > 0) demoActivity[k] = value;
     });
 
-    return { v: 2, courses: courses, activity: activity, demoActivity: demoActivity };
+    return {
+      v: 2,
+      courses: courses,
+      activity: activity,
+      demoActivity: demoActivity,
+      details: cleanDetails(data.details),
+      demoDetails: cleanDetails(data.demoDetails),
+    };
   }
 
   // ---------- DOM ----------
@@ -419,6 +476,13 @@
     conflictTakeRemote: $("#conflictTakeRemote"),
     conflictPushLocal: $("#conflictPushLocal"),
     conflictCancel: $("#conflictCancel"),
+    dayDetail: $("#dayDetail"),
+    dayTitle: $("#dayTitle"),
+    dayTotal: $("#dayTotal"),
+    dayDemo: $("#dayDemo"),
+    dayBody: $("#dayBody"),
+    dayClose: $("#dayClose"),
+    dayCloseBtn: $("#dayCloseBtn"),
     toast: $("#toast"),
   };
 
@@ -642,16 +706,173 @@
       const key = dateKey(d);
       const min = state.activity[key] || 0;
       const isFuture = key > todayKey();
+      const hasDetail = hasDayDetails(key);
+      const canOpen = !isFuture && (min > 0 || hasDetail);
+      const readable =
+        key +
+        " " +
+        WEEK_CN[d.getDay()] +
+        (isFuture
+          ? " · 还没到"
+          : min
+          ? " · 看了 " + min + " 分钟"
+          : " · 还没有学习记录");
+      // 有打卡的日期可以点开当日详情；空白日期只给一句轻提示
       html +=
-        '<i class="cell l' +
+        '<button type="button" class="cell l' +
         minuteLevel(min) +
         (isFuture ? " future" : "") +
-        '" title="' +
+        (min ? " has-data" : "") +
+        (hasDetail ? " has-detail" : "") +
+        '" data-date="' +
         key +
-        (isFuture ? "" : " · 看了 " + min + " 分钟") +
-        '"></i>';
+        '" tabindex="' +
+        (canOpen ? "0" : "-1") +
+        '" aria-disabled="' +
+        (isFuture ? "true" : "false") +
+        '" aria-label="' +
+        escapeHtml(readable + (hasDetail ? "，查看当天明细" : "")) +
+        '" title="' +
+        escapeHtml(readable) +
+        '"></button>';
     }
     el.heatmap.innerHTML = html;
+  }
+
+  /** 这一天有没有明细记录（真实或示例） */
+  function hasDayDetails(key) {
+    return !!(
+      (state.details && state.details[key]) ||
+      (state.demoDetails && state.demoDetails[key])
+    );
+  }
+
+  /** "2026-11-07" → "2026 年 11 月 7 日 · 星期五" */
+  function dayLabel(key) {
+    const p = key.split("-");
+    const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    return (
+      d.getFullYear() +
+      " 年 " +
+      (d.getMonth() + 1) +
+      " 月 " +
+      d.getDate() +
+      " 日 · " +
+      WEEK_CN[d.getDay()]
+    );
+  }
+
+  /** 一条明细 → 当前课程名 / 课时序号 / 当前进度 */
+  function describeDetail(entry) {
+    const course = findCourse(entry.cid);
+    const lesson = course ? findLesson(course, entry.lid) : null;
+    let idx = entry.idx || 0;
+    if (course) {
+      const at = course.lessons.indexOf(lesson);
+      if (at >= 0) idx = at + 1;
+    }
+
+    let name;
+    if (course) {
+      name = "《" + course.name + "》";
+    } else {
+      name = "已删除的课程";
+    }
+
+    let progress;
+    if (!course) {
+      progress = "课程已不在本子里，只留下这条记录";
+    } else if (!lesson) {
+      progress = "这一节已经被删掉了，只留下这条记录";
+    } else if (!lesson.totalMin) {
+      progress = "总时长还没填，当前已看 " + fmtDur(lesson.watchedMin);
+    } else {
+      progress =
+        "当前进度 " +
+        fmtDur(lesson.watchedMin) +
+        " / " +
+        fmtDur(lesson.totalMin) +
+        " · " +
+        lessonPct(lesson) +
+        "%";
+    }
+
+    return {
+      courseName: name,
+      lessonName: idx ? "第 " + idx + " 节" : "课时",
+      progress: progress,
+    };
+  }
+
+  let dayReturnFocus = null;
+
+  /** 打开某一天的详情弹层；cell 用于关闭后把焦点还回去 */
+  function openDayDetail(key, cell) {
+    const min = state.activity[key] || 0;
+    const real = (state.details && state.details[key]) || [];
+    const demo = (state.demoDetails && state.demoDetails[key]) || [];
+    const items = real
+      .map(function (entry) {
+        return { entry: entry, demo: false };
+      })
+      .concat(
+        demo.map(function (entry) {
+          return { entry: entry, demo: true };
+        })
+      )
+      .sort(function (a, b) {
+        return (a.entry.at || 0) - (b.entry.at || 0);
+      });
+
+    el.dayTitle.textContent = dayLabel(key);
+    el.dayTotal.textContent = min
+      ? "当天累计看了 " + min + " 分钟（" + fmtDur(min) + "）"
+      : "这一天的打卡分钟数已经归零";
+
+    if (items.length) {
+      el.dayDemo.hidden = !demo.length;
+      el.dayDemo.textContent = real.length
+        ? "这一天含示例数据，带「示例」标记的条目不是你真实的学习记录"
+        : "这一天是示例打卡，不是你的真实学习记录";
+      el.dayBody.innerHTML =
+        '<ul class="day-list">' +
+        items
+          .map(function (it) {
+            const view = describeDetail(it.entry);
+            return (
+              '<li class="day-item' +
+              (it.demo ? " is-demo" : "") +
+              '">' +
+              '<div class="di-top"><span class="di-name">' +
+              escapeHtml(view.courseName + " · " + view.lessonName) +
+              (it.demo ? '<span class="di-tag">示例</span>' : "") +
+              '</span><span class="di-add mono">当天 +' +
+              it.entry.min +
+              " 分钟</span></div>" +
+              '<div class="di-meta">' +
+              escapeHtml(view.progress) +
+              "</div></li>"
+            );
+          })
+          .join("") +
+        "</ul>";
+    } else {
+      el.dayDemo.hidden = true;
+      el.dayBody.innerHTML =
+        '<p class="day-empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>';
+    }
+
+    dayReturnFocus = cell || null;
+    el.dayDetail.hidden = false;
+    el.dayClose.focus();
+  }
+
+  function closeDayDetail() {
+    if (el.dayDetail.hidden) return;
+    el.dayDetail.hidden = true;
+    const back = dayReturnFocus;
+    dayReturnFocus = null;
+    if (back && document.contains(back)) back.focus();
   }
 
   function renderStreak() {
@@ -739,7 +960,36 @@
     }
   }
 
-  /** 从日历里扣掉示例打卡的部分，真实打卡保留 */
+  /**
+   * 记录一条当日明细（与 activity 并存，activity 语义不变）。
+   * 同一天同一课时只保留一条，多次增加合并累加；只记正增量，
+   * 手动把已看时长改小时不会产生负的明细。
+   */
+  function recordDetail(course, lesson, delta) {
+    if (!delta || delta <= 0) return;
+    const key = todayKey();
+    if (!state.details) state.details = {};
+    const list = state.details[key] || [];
+    const idx = course.lessons.indexOf(lesson) + 1;
+    const now = Date.now();
+    let found = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].cid === course.id && list[i].lid === lesson.id) {
+        found = list[i];
+        break;
+      }
+    }
+    if (found) {
+      found.min = Math.min(99999, found.min + delta);
+      found.at = now;
+      if (!found.idx && idx > 0) found.idx = idx;
+    } else {
+      list.push({ cid: course.id, lid: lesson.id, idx: idx, min: delta, at: now });
+    }
+    state.details[key] = list;
+  }
+
+  /** 从日历里扣掉示例打卡的部分，真实打卡保留；示例明细整份清掉 */
   function subtractDemoActivity() {
     Object.keys(state.demoActivity || {}).forEach(function (key) {
       const left = (state.activity[key] || 0) - state.demoActivity[key];
@@ -750,6 +1000,7 @@
       }
     });
     state.demoActivity = {};
+    state.demoDetails = {};
   }
 
   /** 清除示例：示例课程 + 示例打卡，自己登记的课程和打卡不动 */
@@ -809,6 +1060,8 @@
     }
     state.activity = {};
     state.demoActivity = {};
+    state.details = {};
+    state.demoDetails = {};
     saveState();
     renderAll();
     toast("打卡记录已重置，课程和已看时长都还在");
@@ -879,7 +1132,9 @@
         }
       }
       lesson.watchedMin = next;
-      adjustActivity(next - before);
+      const delta = next - before;
+      adjustActivity(delta);
+      recordDetail(course, lesson, delta);
     }
 
     saveState();
@@ -916,7 +1171,9 @@
         toast("已到总时长上限，自动标记为看完");
       }
       lesson.watchedMin = next;
-      adjustActivity(next - before);
+      const delta = next - before;
+      adjustActivity(delta);
+      recordDetail(course, lesson, delta);
     }
 
     if (act === "full") {
@@ -926,7 +1183,9 @@
       }
       const before = lesson.watchedMin;
       lesson.watchedMin = lesson.totalMin;
-      adjustActivity(lesson.totalMin - before);
+      const delta = lesson.totalMin - before;
+      adjustActivity(delta);
+      recordDetail(course, lesson, delta);
     }
 
     saveState();
@@ -1548,13 +1807,15 @@
     return (h >>> 0).toString(36) + ":" + text.length;
   }
 
-  /** 上传 / 比对用的整份快照；示例打卡也记一份，跨设备才能一致 */
+  /** 上传 / 比对用的整份快照；示例打卡与明细也记一份，跨设备才能一致 */
   function snapshot() {
     return {
       v: 2,
       courses: state.courses,
       activity: state.activity,
       demoActivity: state.demoActivity || {},
+      details: state.details || {},
+      demoDetails: state.demoDetails || {},
     };
   }
 
@@ -1562,7 +1823,9 @@
     return (
       state.courses.length > 0 ||
       Object.keys(state.activity).length > 0 ||
-      Object.keys(state.demoActivity || {}).length > 0
+      Object.keys(state.demoActivity || {}).length > 0 ||
+      Object.keys(state.details || {}).length > 0 ||
+      Object.keys(state.demoDetails || {}).length > 0
     );
   }
 
@@ -2923,6 +3186,42 @@
     el.courseName.focus();
   });
 
+  // ---------- 热力图 · 当日学习详情 ----------
+
+  el.heatmap.addEventListener("click", function (e) {
+    const cell = e.target.closest(".cell");
+    if (!cell || !el.heatmap.contains(cell)) return;
+    const key = cell.dataset.date;
+    if (!key) return;
+    if (key > todayKey()) {
+      toast("这一天还没到，先专心过好今天");
+      return;
+    }
+    if (!state.activity[key] && !hasDayDetails(key)) {
+      toast("这天还没有学习记录");
+      return;
+    }
+    openDayDetail(key, cell);
+  });
+
+  // 键盘：Enter / 空格打开，和鼠标点击走同一套逻辑
+  el.heatmap.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    const cell = e.target.closest(".cell");
+    if (!cell) return;
+    e.preventDefault();
+    cell.click();
+  });
+
+  el.dayClose.addEventListener("click", closeDayDetail);
+  el.dayCloseBtn.addEventListener("click", closeDayDetail);
+  el.dayDetail.addEventListener("click", function (e) {
+    if (e.target.hasAttribute("data-day-close")) closeDayDetail();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeDayDetail();
+  });
+
   el.courseList.addEventListener("click", function (e) {
     const toggle = e.target.closest(".course-toggle");
     if (toggle) {
@@ -3127,11 +3426,23 @@
     });
 
     state.courses.push(
-      { id: makeId(), name: "C 语言程序设计", lessons: cLessons, demo: true },
-      { id: makeId(), name: "大学计算机基础", lessons: bLessons, demo: true }
+      {
+        id: makeId(),
+        name: "C 语言程序设计",
+        lessons: cLessons,
+        demo: true,
+      },
+      {
+        id: makeId(),
+        name: "大学计算机基础",
+        lessons: bLessons,
+        demo: true,
+      }
     );
+    const cCourse = state.courses[state.courses.length - 2];
+    const bCourse = state.courses[state.courses.length - 1];
 
-    // 先扣掉上一次的示例打卡，再写入新的，避免重复叠加
+    // 先扣掉上一次的示例打卡与明细，再写入新的，避免重复叠加
     subtractDemoActivity();
     const demo = {};
     [7, 6, 5, 3, 2, 1].forEach(function (back, idx) {
@@ -3141,6 +3452,41 @@
       state.activity[key] = (state.activity[key] || 0) + min;
     });
     state.demoActivity = demo;
+
+    // 示例明细：每天拆到具体课时，分钟数与示例打卡总量对得上
+    const demoPlan = [
+      [7, cCourse, 1, 45],
+      [6, cCourse, 2, 45],
+      [6, cCourse, 3, 45],
+      [5, cCourse, 13, 20],
+      [3, cCourse, 4, 45],
+      [3, cCourse, 5, 15],
+      [2, bCourse, 1, 30],
+      [1, cCourse, 6, 45],
+      [1, cCourse, 7, 45],
+      [1, bCourse, 2, 30],
+    ];
+    const demoDetails = {};
+    let order = 0;
+    demoPlan.forEach(function (row) {
+      const back = row[0];
+      const course = row[1];
+      const lessonNo = row[2];
+      const min = row[3];
+      const day = addDays(today, -back);
+      const key = dateKey(day);
+      const list = demoDetails[key] || (demoDetails[key] = []);
+      list.push({
+        cid: course.id,
+        lid: course.lessons[lessonNo - 1].id,
+        idx: lessonNo,
+        min: min,
+        at:
+          new Date(day.getFullYear(), day.getMonth(), day.getDate(), 20, 0).getTime() +
+          order++ * 1000,
+      });
+    });
+    state.demoDetails = demoDetails;
 
     saveState();
     seenIds.clear();
@@ -3163,6 +3509,8 @@
         courses: state.courses,
         activity: state.activity,
         demoActivity: state.demoActivity,
+        details: state.details || {},
+        demoDetails: state.demoDetails || {},
       },
       null,
       2

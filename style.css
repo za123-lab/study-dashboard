@@ -330,6 +330,10 @@ h1 {
   width: 100%;
   min-width: 0;
   aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  cursor: default;
   border-radius: 2px;
   background: rgba(32, 52, 78, 0.045);
   box-shadow: inset 0 0 0 1px rgba(32, 52, 78, 0.07);
@@ -359,6 +363,18 @@ h1 {
 .heatmap .cell:hover {
   transform: scale(1.35);
   outline: 1px solid var(--ink);
+  position: relative;
+  z-index: 2;
+}
+
+.heatmap .cell.has-data {
+  cursor: pointer;
+}
+
+.heatmap .cell:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  transform: scale(1.2);
   position: relative;
   z-index: 2;
 }
@@ -1210,6 +1226,147 @@ input:focus {
 .modal-actions .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ---------- 当日学习详情 ---------- */
+
+.day-card {
+  width: min(480px, 100%);
+  max-height: min(82vh, 620px);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 24px;
+}
+
+.day-card h3 {
+  padding-right: 40px;
+  margin-bottom: 6px;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.day-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.day-close:hover,
+.day-close:focus-visible {
+  color: var(--ink);
+  background: rgba(32, 52, 78, 0.06);
+  border-color: var(--rule);
+  outline: none;
+}
+
+.day-total {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--red-deep);
+}
+
+.day-demo {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  background: rgba(32, 52, 78, 0.05);
+  border-left: 3px solid rgba(32, 52, 78, 0.25);
+}
+
+.day-body {
+  min-height: 0;
+  margin: 12px 0 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.day-item {
+  padding: 10px 12px;
+  background: rgba(32, 52, 78, 0.03);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.day-item.is-demo {
+  border-style: dashed;
+}
+
+.di-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.di-name {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.di-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  font-style: normal;
+  color: var(--ink-soft);
+  border: 1px dashed rgba(32, 52, 78, 0.4);
+  border-radius: 3px;
+  vertical-align: 1px;
+}
+
+.di-add {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--red-deep);
+  white-space: nowrap;
+}
+
+.di-meta {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+.day-empty {
+  margin: 0;
+  padding: 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  background: rgba(32, 52, 78, 0.03);
+  border-radius: 8px;
 }
 
 /* ---------- 示例数据提示 ---------- */
