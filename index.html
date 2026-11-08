@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人学业工作台：记录课程学习、待办清单与日程安排">
   <title>学业工作台</title>
-  <link rel="stylesheet" href="style.css?v=20261108-9">
+  <link rel="stylesheet" href="style.css?v=20261108-13">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -139,7 +139,6 @@
         <div class="panel-head todo-head">
           <div>
             <h2>待办清单</h2>
-            <p class="panel-cap">默认按截止时间排；逾期红、24 小时内橙、7 天内黄</p>
           </div>
           <div class="todo-head-actions">
             <button type="button" class="btn primary" id="todoAddBtn">+ 新增待办</button>
@@ -167,6 +166,12 @@
               <option value="done">已完成</option>
             </select>
           </label>
+          <div class="todo-legend" aria-label="紧急度颜色图例">
+            <span class="todo-legend-item"><i class="todo-legend-dot u-overdue" aria-hidden="true"></i>已逾期</span>
+            <span class="todo-legend-item"><i class="todo-legend-dot u-soon" aria-hidden="true"></i>24 小时内</span>
+            <span class="todo-legend-item"><i class="todo-legend-dot u-week" aria-hidden="true"></i>7 天内</span>
+            <span class="todo-legend-item"><i class="todo-legend-dot u-far" aria-hidden="true"></i>更远或无截止</span>
+          </div>
         </div>
 
         <ul class="todo-list" id="todoList"></ul>
@@ -313,7 +318,7 @@
           <button type="submit" class="btn primary" id="supaLoginBtn">登录</button>
         </form>
         <p class="sync-status mono" id="supaAuthStatus" role="status" aria-live="polite">未登录</p>
-        <p class="sync-hint">账号在 Supabase 控制台创建（Authentication → Users → Add user），只服务自己一个人。</p>
+        <p class="sync-hint">账号在 Supabase 控制台创建（Authentication → Users → Add user）。</p>
       </div>
 
       <!-- 已登录 -->
@@ -497,7 +502,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-9"></script>
+  <script src="app.js?v=20261108-13"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {

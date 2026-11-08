@@ -2294,6 +2294,48 @@ input:focus {
   width: 140px;
 }
 
+/* 紧急度色块图例：跟在筛选控件同一行，靠右，保持辅助信息的量级 */
+.todo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+
+.todo-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.todo-legend-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.todo-legend-dot.u-overdue {
+  background: var(--u-overdue);
+}
+
+.todo-legend-dot.u-soon {
+  background: var(--u-soon);
+}
+
+.todo-legend-dot.u-week {
+  background: var(--u-week);
+}
+
+.todo-legend-dot.u-far {
+  background: var(--u-far);
+}
+
 .todo-list {
   display: flex;
   flex-direction: column;
@@ -2963,6 +3005,13 @@ input:focus {
     width: 100%;
     min-height: 44px;
     font-size: 16px;
+  }
+
+  .todo-legend {
+    flex: 1 1 100%;
+    margin-left: 0;
+    gap: 4px 10px;
+    font-size: 10.5px;
   }
 
   .cal-nav {
