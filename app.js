@@ -219,6 +219,7 @@
       demoActivity: {},
       details: {},
       demoDetails: {},
+      todos: [],
     };
   }
 
@@ -346,6 +347,66 @@
     return out;
   }
 
+  const TODO_CATS = {
+    study: "学业",
+    contest: "竞赛",
+    event: "赛事",
+    other: "其他",
+  };
+  const TODO_PRI = ["P0", "P1", "P2"];
+
+  /** 待办整理：缺字段、非法值全部兜底；旧版 JSON 没有 todos 时返回空数组 */
+  function cleanTodos(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seenIds = {};
+    raw.forEach(function (item) {
+      if (!item || typeof item !== "object") return;
+      const title = typeof item.title === "string" ? item.title.trim().slice(0, 120) : "";
+      if (!title) return;
+      let id =
+        typeof item.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(item.id)
+          ? item.id
+          : makeId();
+      if (seenIds[id]) id = makeId();
+      seenIds[id] = true;
+
+      const cat = TODO_CATS[item.cat] ? item.cat : "other";
+      const pri = TODO_PRI.indexOf(item.pri) >= 0 ? item.pri : "P1";
+      const due =
+        typeof item.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.due)
+          ? item.due
+          : "";
+      let dueTime = typeof item.dueTime === "string" ? item.dueTime.trim() : "";
+      if (!/^([01]?\d|2[0-4]):[0-5]\d$/.test(dueTime)) dueTime = "";
+      const done = item.done === true;
+      const doneAt = done ? Math.min(clampInt(item.doneAt, 0, 4102444800000, 0), 4102444800000) : 0;
+      const note = typeof item.note === "string" ? item.note.trim().slice(0, 500) : "";
+      let link = "";
+      if (typeof item.link === "string" && /^https?:\/\//i.test(item.link.trim())) {
+        link = item.link.trim().slice(0, 300);
+      }
+      const dueNote =
+        typeof item.dueNote === "string" ? item.dueNote.trim().slice(0, 80) : "";
+
+      const todo = {
+        id: id,
+        title: title,
+        cat: cat,
+        due: due,
+        dueTime: dueTime,
+        pri: pri,
+        done: done,
+        doneAt: doneAt || null,
+        note: note,
+        link: link,
+      };
+      if (dueNote) todo.dueNote = dueNote;
+      out.push(todo);
+    });
+    return out;
+  }
+
   /** 把外部数据（本地存储或导入的 JSON）整理成可信结构，非法则返回 null */
   function sanitize(data) {
     if (!data || typeof data !== "object") return null;
@@ -396,6 +457,7 @@
       demoActivity: demoActivity,
       details: cleanDetails(data.details),
       demoDetails: cleanDetails(data.demoDetails),
+      todos: cleanTodos(data.todos),
     };
   }
 
@@ -483,6 +545,38 @@
     dayBody: $("#dayBody"),
     dayClose: $("#dayClose"),
     dayCloseBtn: $("#dayCloseBtn"),
+    tabStudy: $("#tabStudy"),
+    tabTodo: $("#tabTodo"),
+    tabCalendar: $("#tabCalendar"),
+    viewStudy: $("#viewStudy"),
+    viewTodo: $("#viewTodo"),
+    viewCalendar: $("#viewCalendar"),
+    todoSummary: $("#todoSummary"),
+    todoCatFilter: $("#todoCatFilter"),
+    todoStatusFilter: $("#todoStatusFilter"),
+    todoList: $("#todoList"),
+    todoEmpty: $("#todoEmpty"),
+    todoAddBtn: $("#todoAddBtn"),
+    todoSeedBtn: $("#todoSeedBtn"),
+    todoEditor: $("#todoEditor"),
+    todoForm: $("#todoForm"),
+    todoId: $("#todoId"),
+    todoTitle: $("#todoTitle"),
+    todoCat: $("#todoCat"),
+    todoPri: $("#todoPri"),
+    todoDue: $("#todoDue"),
+    todoDueTime: $("#todoDueTime"),
+    todoNote: $("#todoNote"),
+    todoLink: $("#todoLink"),
+    todoEditorTitle: $("#todoEditorTitle"),
+    todoEditorClose: $("#todoEditorClose"),
+    calPrev: $("#calPrev"),
+    calNext: $("#calNext"),
+    calToday: $("#calToday"),
+    calMonth: $("#calMonth"),
+    calMonthTotal: $("#calMonthTotal"),
+    calGrid: $("#calGrid"),
+    calList: $("#calList"),
     toast: $("#toast"),
   };
 
@@ -496,6 +590,8 @@
     renderStreak();
     renderDemoNotice();
     renderHeatNote();
+    renderTodos();
+    renderCalendar();
   }
 
   function renderHeader() {
@@ -806,8 +902,23 @@
 
   let dayReturnFocus = null;
 
-  /** 打开某一天的详情弹层；cell 用于关闭后把焦点还回去 */
-  function openDayDetail(key, cell) {
+  /** 某一天的待办（按截止时间与优先级排） */
+  function todosOnDay(key) {
+    return (state.todos || [])
+      .filter(function (t) {
+        return t.due === key;
+      })
+      .sort(function (a, b) {
+        if (a.done !== b.done) return a.done ? 1 : -1;
+        return TODO_PRI.indexOf(a.pri) - TODO_PRI.indexOf(b.pri);
+      });
+  }
+
+  /**
+   * 打开某一天的详情弹层；cell 用于关闭后把焦点还回去。
+   * forceOpen：日历里点空白日期也要打开（热力图仍只对已有记录的日期开放）。
+   */
+  function openDayDetail(key, cell, forceOpen) {
     const min = state.activity[key] || 0;
     const real = (state.details && state.details[key]) || [];
     const demo = (state.demoDetails && state.demoDetails[key]) || [];
@@ -824,42 +935,93 @@
         return (a.entry.at || 0) - (b.entry.at || 0);
       });
 
+    const dayTodos = todosOnDay(key);
+
     el.dayTitle.textContent = dayLabel(key);
-    el.dayTotal.textContent = min
-      ? "当天累计看了 " + min + " 分钟（" + fmtDur(min) + "）"
-      : "这一天的打卡分钟数已经归零";
+    if (min) {
+      el.dayTotal.textContent = "当天累计看了 " + min + " 分钟（" + fmtDur(min) + "）";
+    } else {
+      el.dayTotal.textContent = "这天没有学习记录";
+    }
+
+    const parts = [];
 
     if (items.length) {
       el.dayDemo.hidden = !demo.length;
       el.dayDemo.textContent = real.length
         ? "这一天含示例数据，带「示例」标记的条目不是你真实的学习记录"
         : "这一天是示例打卡，不是你的真实学习记录";
-      el.dayBody.innerHTML =
+      parts.push(
+        '<h4 class="day-h">当天学习 · ' + items.length + " 条明细</h4>",
         '<ul class="day-list">' +
-        items
-          .map(function (it) {
-            const view = describeDetail(it.entry);
-            return (
-              '<li class="day-item' +
-              (it.demo ? " is-demo" : "") +
-              '">' +
-              '<div class="di-top"><span class="di-name">' +
-              escapeHtml(view.courseName + " · " + view.lessonName) +
-              (it.demo ? '<span class="di-tag">示例</span>' : "") +
-              '</span><span class="di-add mono">当天 +' +
-              it.entry.min +
-              " 分钟</span></div>" +
-              '<div class="di-meta">' +
-              escapeHtml(view.progress) +
-              "</div></li>"
-            );
-          })
-          .join("") +
-        "</ul>";
+          items
+            .map(function (it) {
+              const view = describeDetail(it.entry);
+              return (
+                '<li class="day-item' +
+                (it.demo ? " is-demo" : "") +
+                '">' +
+                '<div class="di-top"><span class="di-name">' +
+                escapeHtml(view.courseName + " · " + view.lessonName) +
+                (it.demo ? '<span class="di-tag">示例</span>' : "") +
+                '</span><span class="di-add mono">当天 +' +
+                it.entry.min +
+                " 分钟</span></div>" +
+                '<div class="di-meta">' +
+                escapeHtml(view.progress) +
+                "</div></li>"
+              );
+            })
+            .join("") +
+          "</ul>"
+      );
     } else {
       el.dayDemo.hidden = true;
+      if (min) {
+        parts.push(
+          '<p class="day-empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>'
+        );
+      } else if (dayTodos.length) {
+        parts.push('<p class="day-sub-empty">这天没有学习记录。</p>');
+      }
+    }
+
+    if (dayTodos.length) {
+      parts.push(
+        '<h4 class="day-h">当天待办 · ' + dayTodos.length + " 项</h4>",
+        '<ul class="day-todo-list">' +
+          dayTodos
+            .map(function (t) {
+              return (
+                '<li class="day-todo' +
+                (t.done ? " is-done" : "") +
+                '"><i class="dot" data-cat="' +
+                escapeHtml(t.cat) +
+                '"></i>' +
+                '<span class="dt-main"><span class="dt-title">' +
+                escapeHtml(t.title) +
+                '</span><span class="dt-meta">' +
+                TODO_CATS[t.cat] +
+                " · " +
+                t.pri +
+                (t.dueTime ? " · " + escapeHtml(t.dueTime) : "") +
+                '</span></span><span class="dt-state">' +
+                (t.done ? "已完成" : "未完成") +
+                "</span></li>"
+              );
+            })
+            .join("") +
+          "</ul>"
+      );
+    } else if (forceOpen) {
+      parts.push('<p class="day-sub-empty">这天没有待办安排。</p>');
+    }
+
+    if (!items.length && !min && !dayTodos.length) {
       el.dayBody.innerHTML =
-        '<p class="day-empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>';
+        '<p class="day-empty">这天没有安排，也没有学习记录。</p>';
+    } else {
+      el.dayBody.innerHTML = parts.join("");
     }
 
     dayReturnFocus = cell || null;
@@ -873,6 +1035,455 @@
     const back = dayReturnFocus;
     dayReturnFocus = null;
     if (back && document.contains(back)) back.focus();
+  }
+
+  // ---------- 待办 ----------
+
+  let currentView = "study";
+  let todoCatFilter = "all";
+  let todoStatusFilter = "all";
+  const initNow = new Date();
+  let calYear = initNow.getFullYear();
+  let calMonthIdx = initNow.getMonth();
+
+  /** 截止时刻：只有日期时按当天 23:59 算，「24:00」也归到当天结束 */
+  function todoDeadline(t) {
+    if (!t.due) return null;
+    const p = t.due.split("-");
+    let hh = 23;
+    let mm = 59;
+    if (t.dueTime) {
+      const q = t.dueTime.split(":");
+      const h = parseInt(q[0], 10);
+      const m = parseInt(q[1], 10);
+      if (h === 24) {
+        hh = 23;
+        mm = 59;
+      } else {
+        hh = h;
+        mm = m;
+      }
+    }
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), hh, mm, 0, 0).getTime();
+  }
+
+  /** 逾期 / 24 小时内 / 7 天内，未完成才算 */
+  function todoUrgency(t) {
+    if (t.done) return "";
+    const dl = todoDeadline(t);
+    if (dl == null) return "no-deadline";
+    const now = Date.now();
+    if (dl < now) return "overdue";
+    if (dl - now <= 24 * 3600 * 1000) return "soon";
+    if (dl - now <= 7 * 24 * 3600 * 1000) return "week";
+    return "";
+  }
+
+  function fmtTodoDue(t) {
+    if (!t.due) return t.dueNote || "截止待确认";
+    const p = t.due.split("-");
+    const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    const now = new Date();
+    let s = Number(p[1]) + " 月 " + Number(p[2]) + " 日";
+    if (Number(p[0]) !== now.getFullYear()) s = Number(p[0]) + " 年 " + s;
+    s += " " + WEEK_CN[d.getDay()].replace("星期", "周");
+    if (t.dueTime) s += " " + t.dueTime;
+    return s;
+  }
+
+  function todoLeftText(t) {
+    if (t.done) return "已完成";
+    const dl = todoDeadline(t);
+    if (dl == null) return "截止待确认";
+    const diff = dl - Date.now();
+    if (diff < 0) {
+      const hours = Math.max(1, Math.ceil(-diff / 3600000));
+      if (hours <= 24) return "已逾期 " + hours + " 小时";
+      return "已逾期 " + Math.ceil(hours / 24) + " 天";
+    }
+    const hours = diff / 3600000;
+    if (hours <= 24) return "还剩 " + Math.max(1, Math.round(hours)) + " 小时";
+    return "还剩 " + Math.ceil(hours / 24) + " 天";
+  }
+
+  function sortedTodos() {
+    return (state.todos || []).slice().sort(function (a, b) {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      if (a.done && b.done) return (b.doneAt || 0) - (a.doneAt || 0);
+      const da = todoDeadline(a);
+      const db = todoDeadline(b);
+      if (da == null && db == null) return TODO_PRI.indexOf(a.pri) - TODO_PRI.indexOf(b.pri);
+      if (da == null) return 1;
+      if (db == null) return -1;
+      if (da !== db) return da - db;
+      return TODO_PRI.indexOf(a.pri) - TODO_PRI.indexOf(b.pri);
+    });
+  }
+
+  function todoCounts() {
+    const now = Date.now();
+    const today = todayKey();
+    const weekEnd = dateKey(addDays(new Date(), 6 - new Date().getDay()));
+    let overdue = 0;
+    let todayN = 0;
+    let week = 0;
+    (state.todos || []).forEach(function (t) {
+      if (t.done || !t.due) return;
+      const dl = todoDeadline(t);
+      if (dl != null && dl < now) overdue++;
+      if (t.due === today) todayN++;
+      if (t.due >= today && t.due <= weekEnd) week++;
+    });
+    return { overdue: overdue, today: todayN, week: week };
+  }
+
+  function renderTodos() {
+    const counts = todoCounts();
+    el.todoSummary.innerHTML =
+      '<span class="sum-chip is-overdue' +
+      (counts.overdue ? "" : " is-zero") +
+      '">逾期 <b class="mono">' +
+      counts.overdue +
+      "</b></span>" +
+      '<span class="sum-chip is-today' +
+      (counts.today ? "" : " is-zero") +
+      '">今日 <b class="mono">' +
+      counts.today +
+      "</b></span>" +
+      '<span class="sum-chip is-week' +
+      (counts.week ? "" : " is-zero") +
+      '">本周 <b class="mono">' +
+      counts.week +
+      "</b></span>";
+
+    const filtered = sortedTodos().filter(function (t) {
+      if (todoCatFilter !== "all" && t.cat !== todoCatFilter) return false;
+      if (todoStatusFilter === "open" && t.done) return false;
+      if (todoStatusFilter === "done" && !t.done) return false;
+      return true;
+    });
+
+    if (!filtered.length) {
+      el.todoList.innerHTML = "";
+      el.todoEmpty.hidden = false;
+      el.todoEmpty.textContent = (state.todos || []).length
+        ? "这里还没有符合条件的待办，换个筛选条件看看。"
+        : "清单还空着。可以点「导入当前待办」一次性写入，也可以自己加一条。";
+      return;
+    }
+    el.todoEmpty.hidden = true;
+
+    el.todoList.innerHTML = filtered
+      .map(function (t) {
+        const urgency = todoUrgency(t);
+        const overdue = urgency === "overdue";
+        return (
+          '<li class="todo-item' +
+          (t.done ? " is-done" : "") +
+          (urgency ? " u-" + urgency : "") +
+          '">' +
+          '<label class="todo-check"><input type="checkbox" data-todo-done="' +
+          escapeHtml(t.id) +
+          '"' +
+          (t.done ? " checked" : "") +
+          ' aria-label="标记为' +
+          (t.done ? "未完成" : "已完成") +
+          '"></label>' +
+          '<div class="todo-main">' +
+          '<div class="todo-title-line"><span class="todo-pri pri-' +
+          t.pri +
+          '">' +
+          t.pri +
+          '</span><span class="todo-title">' +
+          escapeHtml(t.title) +
+          "</span></div>" +
+          '<div class="todo-meta"><span class="todo-cat" data-cat="' +
+          t.cat +
+          '">' +
+          TODO_CATS[t.cat] +
+          '</span><span class="todo-due' +
+          (overdue ? " is-overdue" : "") +
+          '">' +
+          escapeHtml(fmtTodoDue(t)) +
+          '</span><span class="todo-left">' +
+          todoLeftText(t) +
+          "</span></div>" +
+          (t.note ? '<p class="todo-note">' + escapeHtml(t.note) + "</p>" : "") +
+          (t.link
+            ? '<a class="todo-link" href="' +
+              escapeHtml(t.link) +
+              '" target="_blank" rel="noopener noreferrer">打开关联链接 ↗</a>'
+            : "") +
+          "</div>" +
+          '<div class="todo-actions">' +
+          '<button type="button" class="mini-btn" data-todo-edit="' +
+          escapeHtml(t.id) +
+          '">编辑</button>' +
+          '<button type="button" class="mini-btn danger" data-todo-del="' +
+          escapeHtml(t.id) +
+          '">删除</button>' +
+          "</div></li>"
+        );
+      })
+      .join("");
+  }
+
+  // ---------- 日历 ----------
+
+  function calDayAria(key, cats, min) {
+    const p = key.split("-");
+    const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    const bits = [Number(p[1]) + " 月 " + Number(p[2]) + " 日 " + WEEK_CN[d.getDay()]];
+    if (cats.length) {
+      bits.push(
+        cats
+          .map(function (c) {
+            return TODO_CATS[c];
+          })
+          .join("、") + " 类待办"
+      );
+    } else {
+      bits.push("没有待办");
+    }
+    bits.push(min ? "学习 " + min + " 分钟" : "没有学习记录");
+    return bits.join("，");
+  }
+
+  function renderCalendar() {
+    const y = calYear;
+    const m = calMonthIdx;
+    const first = new Date(y, m, 1);
+    const days = new Date(y, m + 1, 0).getDate();
+    const startPad = first.getDay();
+    const today = todayKey();
+    const prefix = y + "-" + pad(m + 1);
+
+    el.calMonth.textContent = y + " 年 " + (m + 1) + " 月";
+
+    let monthCount = 0;
+    (state.todos || []).forEach(function (t) {
+      if (!t.done && t.due && t.due.slice(0, 7) === prefix) monthCount++;
+    });
+    el.calMonthTotal.textContent = monthCount
+      ? "本月截止 " + monthCount + " 项（未完成）"
+      : "本月没有截止项";
+
+    // 每天涉及的待办类别（去重）
+    const dayCats = {};
+    (state.todos || []).forEach(function (t) {
+      if (!t.due) return;
+      const list = dayCats[t.due] || (dayCats[t.due] = []);
+      if (list.indexOf(t.cat) < 0) list.push(t.cat);
+    });
+
+    let grid = "";
+    for (let i = 0; i < startPad; i++) {
+      grid += '<span class="cal-blank" aria-hidden="true"></span>';
+    }
+    let listHtml = "";
+    for (let d = 1; d <= days; d++) {
+      const key = prefix + "-" + pad(d);
+      const cats = dayCats[key] || [];
+      const min = state.activity[key] || 0;
+      const weekday = WEEK_CN[new Date(y, m, d).getDay()];
+      const dots =
+        cats
+          .map(function (c) {
+            return '<i class="dot" data-cat="' + c + '"></i>';
+          })
+          .join("") + (min ? '<i class="dot dot-study"></i>' : "");
+
+      grid +=
+        '<button type="button" class="cal-cell' +
+        (key === today ? " is-today" : "") +
+        (cats.length ? " has-due" : "") +
+        (min ? " has-study" : "") +
+        '" data-cal-date="' +
+        key +
+        '" aria-label="' +
+        escapeHtml(calDayAria(key, cats, min)) +
+        '">' +
+        '<span class="cal-day-num mono">' +
+        d +
+        "</span>" +
+        '<span class="cal-dots">' +
+        dots +
+        "</span>" +
+        (min ? '<span class="cal-min mono">' + min + "′</span>" : "") +
+        "</button>";
+
+      // 手机列表视图：每天一行，避免七列挤成豆腐块
+      listHtml +=
+        '<button type="button" class="cal-row' +
+        (key === today ? " is-today" : "") +
+        (cats.length || min ? " has-any" : "") +
+        '" data-cal-date="' +
+        key +
+        '" aria-label="' +
+        escapeHtml(calDayAria(key, cats, min)) +
+        '">' +
+        '<span class="cal-row-day"><b class="mono">' +
+        d +
+        "</b><i>" +
+        weekday.replace("星期", "周") +
+        "</i></span>" +
+        '<span class="cal-row-main">' +
+        (cats.length
+          ? cats
+              .map(function (c) {
+                return '<span class="cal-tag" data-cat="' + c + '">' + TODO_CATS[c] + "</span>";
+              })
+              .join("")
+          : '<span class="cal-none">没有待办</span>') +
+        "</span>" +
+        '<span class="cal-row-min mono">' +
+        (min ? min + "′" : "—") +
+        "</span></button>";
+    }
+    const tail = (startPad + days) % 7;
+    for (let i = 0; i < (tail ? 7 - tail : 0); i++) {
+      grid += '<span class="cal-blank" aria-hidden="true"></span>';
+    }
+
+    el.calGrid.innerHTML = grid;
+    el.calList.innerHTML = listHtml;
+  }
+
+  function shiftMonth(delta) {
+    const d = new Date(calYear, calMonthIdx + delta, 1);
+    calYear = d.getFullYear();
+    calMonthIdx = d.getMonth();
+    renderCalendar();
+  }
+
+  // ---------- 视图切换 ----------
+
+  function setView(name) {
+    currentView = name;
+    const views = {
+      study: el.viewStudy,
+      todo: el.viewTodo,
+      calendar: el.viewCalendar,
+    };
+    const tabs = {
+      study: el.tabStudy,
+      todo: el.tabTodo,
+      calendar: el.tabCalendar,
+    };
+    Object.keys(views).forEach(function (k) {
+      const on = k === name;
+      views[k].hidden = !on;
+      tabs[k].classList.toggle("is-active", on);
+      tabs[k].setAttribute("aria-selected", on ? "true" : "false");
+    });
+    if (name === "todo") renderTodos();
+    if (name === "calendar") renderCalendar();
+  }
+
+  // ---------- 待办编辑 ----------
+
+  function normalizeTodoTime(raw) {
+    const s = String(raw == null ? "" : raw).trim();
+    if (!s) return "";
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    if (h > 24 || mm > 59 || (h === 24 && mm > 0)) return null;
+    return pad(h) + ":" + pad(mm);
+  }
+
+  function openTodoEditor(id) {
+    const todo = id
+      ? (state.todos || []).find(function (t) {
+          return t.id === id;
+        })
+      : null;
+    el.todoEditorTitle.textContent = todo ? "编辑待办" : "新增待办";
+    el.todoId.value = todo ? todo.id : "";
+    el.todoTitle.value = todo ? todo.title : "";
+    el.todoCat.value = todo ? todo.cat : "study";
+    el.todoPri.value = todo ? todo.pri : "P1";
+    el.todoDue.value = todo ? todo.due : "";
+    el.todoDueTime.value = todo ? todo.dueTime : "";
+    el.todoNote.value = todo ? todo.note : "";
+    el.todoLink.value = todo ? todo.link : "";
+    el.todoEditor.hidden = false;
+    el.todoTitle.focus();
+  }
+
+  function closeTodoEditor() {
+    el.todoEditor.hidden = true;
+    el.todoForm.reset();
+    el.todoId.value = "";
+  }
+
+  function saveTodos(message) {
+    saveState();
+    renderAll();
+    if (message) toast(message);
+  }
+
+  /** 初始待办：按用户给定的清单，不来自任何通知 */
+  function initialTodos() {
+    return [
+      {
+        title: "计算机专业英语期末大作业 —— 双语总结文档",
+        cat: "study",
+        due: "2026-11-11",
+        dueTime: "24:00",
+        pri: "P0",
+      },
+      {
+        title: "计算机专业英语期末大作业 —— 7–15 分钟双语讲解视频",
+        cat: "study",
+        due: "2026-11-11",
+        dueTime: "24:00",
+        pri: "P0",
+      },
+      {
+        title: "计算机专业英语期末大作业 —— 英文思维导图（XMind 导出 PNG）",
+        cat: "study",
+        due: "2026-11-11",
+        dueTime: "24:00",
+        pri: "P0",
+      },
+      {
+        title: "职业规划大赛院赛 —— 报名与材料提交",
+        cat: "event",
+        due: "",
+        dueNote: "截止日期待确认",
+        pri: "P1",
+      },
+      {
+        title: "米兰设计周 · 兔宝宝杯家居设计赛 —— 作品视频 + 海报提交",
+        cat: "contest",
+        due: "2027-01-18",
+        dueTime: "",
+        pri: "P2",
+      },
+      {
+        title: "米兰设计周非命题 · 数字媒体 UI 类 —— 最终提交",
+        cat: "contest",
+        due: "",
+        dueNote: "2027 年 4 月（具体日待确认）",
+        pri: "P2",
+      },
+    ].map(function (t) {
+      return {
+        id: makeId(),
+        title: t.title,
+        cat: t.cat,
+        due: t.due,
+        dueTime: t.dueTime || "",
+        pri: t.pri,
+        done: false,
+        doneAt: null,
+        note: "",
+        link: "",
+        dueNote: t.dueNote || "",
+      };
+    });
   }
 
   function renderStreak() {
@@ -1807,7 +2418,7 @@
     return (h >>> 0).toString(36) + ":" + text.length;
   }
 
-  /** 上传 / 比对用的整份快照；示例打卡与明细也记一份，跨设备才能一致 */
+  /** 上传 / 比对用的整份快照；示例打卡、明细与待办也记一份，跨设备才能一致 */
   function snapshot() {
     return {
       v: 2,
@@ -1816,6 +2427,7 @@
       demoActivity: state.demoActivity || {},
       details: state.details || {},
       demoDetails: state.demoDetails || {},
+      todos: state.todos || [],
     };
   }
 
@@ -1825,7 +2437,8 @@
       Object.keys(state.activity).length > 0 ||
       Object.keys(state.demoActivity || {}).length > 0 ||
       Object.keys(state.details || {}).length > 0 ||
-      Object.keys(state.demoDetails || {}).length > 0
+      Object.keys(state.demoDetails || {}).length > 0 ||
+      (state.todos || []).length > 0
     );
   }
 
@@ -3219,8 +3832,183 @@
     if (e.target.hasAttribute("data-day-close")) closeDayDetail();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeDayDetail();
+    if (e.key !== "Escape") return;
+    if (!el.todoEditor.hidden) {
+      closeTodoEditor();
+      return;
+    }
+    closeDayDetail();
   });
+
+  // ---------- 视图切换 / 待办 / 日历 ----------
+
+  el.tabStudy.addEventListener("click", function () {
+    setView("study");
+  });
+  el.tabTodo.addEventListener("click", function () {
+    setView("todo");
+  });
+  el.tabCalendar.addEventListener("click", function () {
+    setView("calendar");
+  });
+
+  el.todoAddBtn.addEventListener("click", function () {
+    openTodoEditor(null);
+  });
+  el.todoEditorClose.addEventListener("click", closeTodoEditor);
+  el.todoEditor.addEventListener("click", function (e) {
+    if (e.target.hasAttribute("data-todo-close")) closeTodoEditor();
+  });
+
+  el.todoSeedBtn.addEventListener("click", function () {
+    const fresh = initialTodos();
+    const existing = {};
+    (state.todos || []).forEach(function (t) {
+      existing[t.title] = true;
+    });
+    const missing = fresh.filter(function (t) {
+      return !existing[t.title];
+    });
+    if (!missing.length) {
+      toast("这 6 条待办都已经在清单里了");
+      return;
+    }
+    if (!confirm("将导入 " + missing.length + " 条初始待办，已有的待办不会覆盖。继续吗？")) {
+      return;
+    }
+    state.todos = (state.todos || []).concat(missing);
+    saveTodos("已导入 " + missing.length + " 条待办，原有清单保持不变");
+    setView("todo");
+  });
+
+  el.todoCatFilter.addEventListener("change", function () {
+    todoCatFilter = el.todoCatFilter.value;
+    renderTodos();
+  });
+  el.todoStatusFilter.addEventListener("change", function () {
+    todoStatusFilter = el.todoStatusFilter.value;
+    renderTodos();
+  });
+
+  el.todoList.addEventListener("change", function (e) {
+    const box = e.target.closest("[data-todo-done]");
+    if (!box) return;
+    const id = box.getAttribute("data-todo-done");
+    const todo = (state.todos || []).find(function (t) {
+      return t.id === id;
+    });
+    if (!todo) return;
+    todo.done = box.checked;
+    todo.doneAt = box.checked ? Date.now() : null;
+    saveTodos(box.checked ? "勾掉一条，干得不错" : "已放回未完成");
+  });
+
+  el.todoList.addEventListener("click", function (e) {
+    const editBtn = e.target.closest("[data-todo-edit]");
+    if (editBtn) {
+      openTodoEditor(editBtn.getAttribute("data-todo-edit"));
+      return;
+    }
+    const delBtn = e.target.closest("[data-todo-del]");
+    if (!delBtn) return;
+    const id = delBtn.getAttribute("data-todo-del");
+    const todo = (state.todos || []).find(function (t) {
+      return t.id === id;
+    });
+    if (!todo) return;
+    if (!confirm("删除这条待办？\n「" + todo.title + "」")) return;
+    state.todos = (state.todos || []).filter(function (t) {
+      return t.id !== id;
+    });
+    saveTodos("已删除这条待办");
+  });
+
+  el.todoForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    const title = el.todoTitle.value.trim();
+    if (!title) {
+      toast("给这条待办起个标题");
+      el.todoTitle.focus();
+      return;
+    }
+    const dueTime = normalizeTodoTime(el.todoDueTime.value);
+    if (dueTime === null) {
+      toast("截止时间写成 24 小时制，例如 23:59");
+      el.todoDueTime.focus();
+      return;
+    }
+    const due = el.todoDue.value;
+    if (dueTime && !due) {
+      toast("没填截止日期，时间先忽略了");
+    }
+    const link = el.todoLink.value.trim();
+    if (link && !/^https?:\/\//i.test(link)) {
+      toast("关联链接要以 http:// 或 https:// 开头");
+      el.todoLink.focus();
+      return;
+    }
+    const id = el.todoId.value;
+    const existing = id
+      ? (state.todos || []).find(function (t) {
+          return t.id === id;
+        })
+      : null;
+    const data = {
+      title: title,
+      cat: el.todoCat.value,
+      due: due,
+      dueTime: due ? dueTime : "",
+      pri: el.todoPri.value,
+      note: el.todoNote.value.trim().slice(0, 500),
+      link: link,
+    };
+    if (existing) {
+      Object.keys(data).forEach(function (k) {
+        existing[k] = data[k];
+      });
+      if (due) delete existing.dueNote;
+    } else {
+      state.todos = (state.todos || []).concat([
+        {
+          id: makeId(),
+          title: data.title,
+          cat: data.cat,
+          due: data.due,
+          dueTime: data.dueTime,
+          pri: data.pri,
+          done: false,
+          doneAt: null,
+          note: data.note,
+          link: data.link,
+        },
+      ]);
+    }
+    closeTodoEditor();
+    saveTodos(existing ? "待办已更新" : "待办已记下");
+  });
+
+  el.calPrev.addEventListener("click", function () {
+    shiftMonth(-1);
+  });
+  el.calNext.addEventListener("click", function () {
+    shiftMonth(1);
+  });
+  el.calToday.addEventListener("click", function () {
+    const d = new Date();
+    calYear = d.getFullYear();
+    calMonthIdx = d.getMonth();
+    renderCalendar();
+  });
+
+  function bindCalendarOpen(container) {
+    container.addEventListener("click", function (e) {
+      const cell = e.target.closest("[data-cal-date]");
+      if (!cell) return;
+      openDayDetail(cell.getAttribute("data-cal-date"), cell, true);
+    });
+  }
+  bindCalendarOpen(el.calGrid);
+  bindCalendarOpen(el.calList);
 
   el.courseList.addEventListener("click", function (e) {
     const toggle = e.target.closest(".course-toggle");
@@ -3498,7 +4286,11 @@
   // ---------- 导入导出 ----------
 
   el.exportBtn.addEventListener("click", function () {
-    if (state.courses.length === 0 && Object.keys(state.activity).length === 0) {
+    if (
+      state.courses.length === 0 &&
+      Object.keys(state.activity).length === 0 &&
+      (state.todos || []).length === 0
+    ) {
       toast("还没有数据可以导出");
       return;
     }
@@ -3511,6 +4303,7 @@
         demoActivity: state.demoActivity,
         details: state.details || {},
         demoDetails: state.demoDetails || {},
+        todos: state.todos || [],
       },
       null,
       2
@@ -3559,7 +4352,13 @@
       seenIds.clear();
       openIds.clear();
       renderAll();
-      toast("导入成功，共 " + data.courses.length + " 门课程");
+      toast(
+        "导入成功，共 " +
+          data.courses.length +
+          " 门课程、" +
+          (data.todos || []).length +
+          " 条待办"
+      );
       el.importFile.value = "";
     };
     reader.onerror = function () {
@@ -3572,14 +4371,15 @@
   el.clearBtn.addEventListener("click", function () {
     if (
       state.courses.length === 0 &&
-      Object.keys(state.activity).length === 0
+      Object.keys(state.activity).length === 0 &&
+      (state.todos || []).length === 0
     ) {
       toast("现在就是空的，不用清");
       return;
     }
     if (
       !confirm(
-        "清空所有课程和打卡记录？课程、每节已看时长、日历打卡会一起清除，且不可撤销。建议先导出备份。"
+        "清空所有课程、打卡和待办？课程、每节已看时长、日历打卡、待办清单会一起清除，且不可撤销。建议先导出备份。"
       )
     ) {
       return;
@@ -3589,7 +4389,7 @@
     seenIds.clear();
     openIds.clear();
     renderAll();
-    toast("已清空课程和打卡，本子重新开张");
+    toast("已清空课程、打卡和待办，本子重新开张");
   });
 
   el.demoClearBtn.addEventListener("click", clearDemoData);

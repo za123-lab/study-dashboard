@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人课程学习进度手账：手动记录、可视化看板">
   <title>学习进度手账</title>
-  <link rel="stylesheet" href="style.css?v=20261108-5">
+  <link rel="stylesheet" href="style.css?v=20261108-6">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -24,6 +24,14 @@
       </div>
     </header>
 
+    <!-- 三视图切换：默认仍是学习 -->
+    <nav class="view-tabs reveal" role="tablist" aria-label="视图切换">
+      <button type="button" class="view-tab is-active" role="tab" id="tabStudy" aria-selected="true" aria-controls="viewStudy">学习</button>
+      <button type="button" class="view-tab" role="tab" id="tabTodo" aria-selected="false" aria-controls="viewTodo">待办</button>
+      <button type="button" class="view-tab" role="tab" id="tabCalendar" aria-selected="false" aria-controls="viewCalendar">日历</button>
+    </nav>
+
+    <div class="view" id="viewStudy" role="tabpanel" aria-labelledby="tabStudy">
     <!-- 总览统计 -->
     <section class="stats reveal" aria-label="总体进度">
       <div class="ring-card">
@@ -106,6 +114,88 @@
       <p>在上方登记第一门课程，或者先看看示例效果：</p>
       <button class="btn ghost" id="seedBtn">填入示例课程</button>
     </div>
+    </div><!-- /viewStudy -->
+
+    <!-- 待办清单 -->
+    <div class="view" id="viewTodo" role="tabpanel" aria-labelledby="tabTodo" hidden>
+      <section class="panel reveal">
+        <div class="panel-head todo-head">
+          <div>
+            <h2>待办清单</h2>
+            <p class="panel-cap">默认按截止时间排；逾期红、24 小时内橙、7 天内黄</p>
+          </div>
+          <div class="todo-head-actions">
+            <button type="button" class="btn primary" id="todoAddBtn">+ 新增待办</button>
+            <button type="button" class="btn ghost" id="todoSeedBtn">导入当前待办</button>
+          </div>
+        </div>
+
+        <div class="todo-summary" id="todoSummary" role="status" aria-live="polite"></div>
+
+        <div class="todo-filters">
+          <label class="field">
+            <span>类别</span>
+            <select id="todoCatFilter">
+              <option value="all">全部类别</option>
+              <option value="study">学业</option>
+              <option value="contest">竞赛</option>
+              <option value="event">赛事</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>状态</span>
+            <select id="todoStatusFilter">
+              <option value="all">全部状态</option>
+              <option value="open">未完成</option>
+              <option value="done">已完成</option>
+            </select>
+          </label>
+        </div>
+
+        <ul class="todo-list" id="todoList"></ul>
+        <p class="todo-empty" id="todoEmpty" hidden></p>
+      </section>
+    </div><!-- /viewTodo -->
+
+    <!-- 日历 -->
+    <div class="view" id="viewCalendar" role="tabpanel" aria-labelledby="tabCalendar" hidden>
+      <section class="panel reveal">
+        <div class="panel-head cal-head">
+          <div>
+            <h2>日历</h2>
+            <p class="panel-cap">点任意一天，看当天待办和当天学习记录</p>
+          </div>
+          <div class="cal-nav">
+            <button type="button" class="btn ghost cal-step" id="calPrev" aria-label="上一个月">← 上月</button>
+            <button type="button" class="btn ghost cal-step" id="calToday">今天</button>
+            <button type="button" class="btn ghost cal-step" id="calNext" aria-label="下一个月">下月 →</button>
+          </div>
+        </div>
+
+        <div class="cal-title-row">
+          <h3 class="cal-month" id="calMonth">—</h3>
+          <span class="cal-month-total mono" id="calMonthTotal"></span>
+        </div>
+
+        <div class="cal-legend" aria-label="图例">
+          <span class="cal-legend-item"><i class="dot" data-cat="study"></i>学业</span>
+          <span class="cal-legend-item"><i class="dot" data-cat="contest"></i>竞赛</span>
+          <span class="cal-legend-item"><i class="dot" data-cat="event"></i>赛事</span>
+          <span class="cal-legend-item"><i class="dot" data-cat="other"></i>其他</span>
+          <span class="cal-legend-item"><i class="dot dot-study"></i>学习分钟</span>
+        </div>
+
+        <div class="cal-frame">
+          <div class="cal-weekdays" aria-hidden="true">
+            <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="cal-list" id="calList"></div>
+        </div>
+      </section>
+    </div><!-- /viewCalendar -->
+
 
     <!-- 设置：云同步（Supabase，可选；不登录也能正常用） -->
     <section class="panel reveal" id="syncPanel">
@@ -278,10 +368,67 @@
     </div>
   </div>
 
+  <!-- 待办编辑 -->
+  <div class="modal" id="todoEditor" hidden>
+    <div class="modal-backdrop" aria-hidden="true" data-todo-close></div>
+    <div class="modal-card todo-card" role="dialog" aria-modal="true" aria-labelledby="todoEditorTitle">
+      <button type="button" class="day-close" id="todoEditorClose" aria-label="关闭待办编辑" title="关闭（Esc）">×</button>
+      <h3 id="todoEditorTitle">新增待办</h3>
+      <form id="todoForm" class="todo-form">
+        <input type="hidden" id="todoId" value="">
+        <label class="field">
+          <span>标题</span>
+          <input type="text" id="todoTitle" maxlength="120" placeholder="要做什么" required>
+        </label>
+        <div class="todo-form-row">
+          <label class="field">
+            <span>类别</span>
+            <select id="todoCat">
+              <option value="study">学业</option>
+              <option value="contest">竞赛</option>
+              <option value="event">赛事</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>优先级</span>
+            <select id="todoPri">
+              <option value="P0">P0 · 最要紧</option>
+              <option value="P1" selected>P1 · 重要</option>
+              <option value="P2">P2 · 有空再做</option>
+            </select>
+          </label>
+        </div>
+        <div class="todo-form-row">
+          <label class="field">
+            <span>截止日期</span>
+            <input type="date" id="todoDue">
+          </label>
+          <label class="field">
+            <span>截止时间（可选）</span>
+            <input type="text" id="todoDueTime" maxlength="5" placeholder="如 24:00">
+          </label>
+        </div>
+        <label class="field">
+          <span>备注</span>
+          <textarea id="todoNote" rows="2" maxlength="500" placeholder="补充说明，可选"></textarea>
+        </label>
+        <label class="field">
+          <span>关联链接（可选）</span>
+          <input type="url" id="todoLink" maxlength="300" placeholder="https://…">
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="btn primary">保存</button>
+          <button type="button" class="btn ghost" data-todo-close>取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-5"></script>
+  <script src="app.js?v=20261108-6"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {
