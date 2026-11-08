@@ -239,6 +239,7 @@
       demoDetails: {},
       todos: [],
       courseOpen: {},
+      panelOpen: { sync: false, bili: false },
     };
   }
 
@@ -461,6 +462,13 @@
       if (rawOpen[id] === true && courseIds.has(id)) courseOpen[id] = true;
     });
 
+    // 页面底部折叠面板（云同步 / B 站导入）的展开状态，跟着课程卡片一起持久化
+    const panelOpen = { sync: false, bili: false };
+    const rawPanelOpen =
+      data.panelOpen && typeof data.panelOpen === "object" ? data.panelOpen : {};
+    if (rawPanelOpen.sync === true) panelOpen.sync = true;
+    if (rawPanelOpen.bili === true) panelOpen.bili = true;
+
     const rawActivity =
       data.activity && typeof data.activity === "object" ? data.activity : {};
     const activity = {};
@@ -495,6 +503,7 @@
       demoDetails: cleanDetails(data.demoDetails),
       todos: cleanTodos(data.todos),
       courseOpen: courseOpen,
+      panelOpen: panelOpen,
     };
   }
 
@@ -542,6 +551,8 @@
     promptText: $("#promptText"),
     copyPromptBtn: $("#copyPromptBtn"),
     biliPanel: $("#biliPanel"),
+    biliToggle: $("#biliToggle"),
+    biliFoldBody: $("#biliFoldBody"),
     biliJson: $("#biliJson"),
     previewBtn: $("#previewBtn"),
     biliClearBtn: $("#biliClearBtn"),
@@ -578,6 +589,9 @@
     supaSyncStatus: $("#supaSyncStatus"),
     supaLiveStatus: $("#supaLiveStatus"),
     syncPanel: $("#syncPanel"),
+    syncToggle: $("#syncToggle"),
+    syncFoldBody: $("#syncFoldBody"),
+    supaHeadStatus: $("#supaHeadStatus"),
     syncConflict: $("#syncConflict"),
     conflictNote: $("#conflictNote"),
     conflictTakeRemote: $("#conflictTakeRemote"),
@@ -676,6 +690,44 @@
     viewDirty.todo = true;
     viewDirty.calendar = true;
     renderView(currentView);
+    applyFoldPanels();
+  }
+
+  // ---------- 页面底部折叠面板（云同步 / B 站导入） ----------
+
+  const FOLD_PANELS = [
+    { key: "sync", panel: "syncPanel", toggle: "syncToggle", body: "syncFoldBody" },
+    { key: "bili", panel: "biliPanel", toggle: "biliToggle", body: "biliFoldBody" },
+  ];
+
+  /** 状态与 class/aria 对齐：收起时内容不占高度，也不进入 Tab 顺序 */
+  function applyFoldPanel(fold) {
+    const panel = el[fold.panel];
+    const toggle = el[fold.toggle];
+    const body = el[fold.body];
+    if (!panel || !toggle || !body) return;
+    const open = !!(state.panelOpen && state.panelOpen[fold.key]);
+    panel.classList.toggle("is-open", open);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    body.setAttribute("aria-hidden", open ? "false" : "true");
+    if ("inert" in body) body.inert = !open;
+  }
+
+  function applyFoldPanels() {
+    FOLD_PANELS.forEach(applyFoldPanel);
+  }
+
+  function bindFoldPanels() {
+    FOLD_PANELS.forEach(function (fold) {
+      const toggle = el[fold.toggle];
+      if (!toggle) return;
+      toggle.addEventListener("click", function () {
+        // 和课程卡片一样写进同一份 state，刷新与跨设备都保持上次的开合
+        state.panelOpen[fold.key] = !state.panelOpen[fold.key];
+        saveState();
+        applyFoldPanel(fold);
+      });
+    });
   }
 
   function renderHeader() {
@@ -3099,6 +3151,7 @@
       demoDetails: state.demoDetails || {},
       todos: state.todos || [],
       courseOpen: state.courseOpen || {},
+      panelOpen: state.panelOpen || {},
     };
   }
 
@@ -4144,11 +4197,38 @@
   function setAuthStatus(kind, text) {
     el.supaAuthStatus.textContent = text;
     el.supaAuthStatus.dataset.state = kind;
+    updateSyncHead(kind === "error" ? "error" : null, kind === "error" ? text : null);
+  }
+
+  /**
+   * 折叠面板顶部一直可见的连接状态：默认按配置/登录态推导，
+   * 传了 alert 就临时显示错误原文，避免把「没连上」藏进面板里。
+   */
+  function updateSyncHead(alertKind, alertText) {
+    if (!el.supaHeadStatus) return;
+    if (alertKind && alertText) {
+      el.supaHeadStatus.textContent = alertText;
+      el.supaHeadStatus.dataset.state = alertKind;
+      return;
+    }
+    const configured = supaConfigured();
+    const loggedIn = !!(supaSession && configured);
+    if (loggedIn) {
+      el.supaHeadStatus.textContent = "已连接 · " + (supaSession.email || "已登录");
+      el.supaHeadStatus.dataset.state = "ok";
+    } else if (configured) {
+      el.supaHeadStatus.textContent = "连接配置已保存 · 尚未登录";
+      el.supaHeadStatus.dataset.state = "warn";
+    } else {
+      el.supaHeadStatus.textContent = "未连接 · 点开可填 Supabase 配置";
+      el.supaHeadStatus.dataset.state = "idle";
+    }
   }
 
   function setCfgStatus(kind, text) {
     el.supaCfgStatus.textContent = text;
     el.supaCfgStatus.dataset.state = kind;
+    updateSyncHead(kind === "error" ? "error" : null, kind === "error" ? text : null);
   }
 
   function failSupaConfig(message, input) {
@@ -4179,6 +4259,7 @@
     }
     el.supaWho.textContent = supaSession.email || supaSession.userId;
     el.supaAuto.checked = !!supaCfg.auto;
+    updateSyncHead();
   }
 
   async function loginWithPassword(email, password) {
@@ -4419,6 +4500,9 @@
   function setSyncStatus(kind, text) {
     el.supaSyncStatus.textContent = text;
     el.supaSyncStatus.dataset.state = kind;
+    // 同步出错时把原因顶到折叠面板的标题栏，收起状态下也能看见
+    if (kind === "error" || kind === "conflict") updateSyncHead(kind, text);
+    else updateSyncHead();
   }
 
   function initSupa() {
@@ -5064,6 +5148,7 @@
         demoDetails: state.demoDetails || {},
         todos: state.todos || [],
         courseOpen: state.courseOpen || {},
+        panelOpen: state.panelOpen || {},
       },
       null,
       2
@@ -5166,6 +5251,7 @@
   applyBranding();
   el.promptText.textContent = BILI_PROMPT;
   el.todoPromptText.textContent = TODO_IMPORT_PROMPT;
+  bindFoldPanels();
   initSupa();
 
   renderAll();
