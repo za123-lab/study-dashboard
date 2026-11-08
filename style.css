@@ -1114,6 +1114,45 @@ input:focus {
   accent-color: var(--red);
 }
 
+/* 待办批量导入：跳过的重复项折叠列表 + 去重规则说明 */
+.todo-dups {
+  margin-top: 14px;
+  padding: 0 13px;
+  background: rgba(32, 52, 78, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.todo-dups summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.todo-dups ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
+.dup-rule {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.import-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ---------- 云同步 ---------- */
 
 .sync-grid {
@@ -2946,6 +2985,10 @@ input:focus {
   .todo-form .field input,
   .todo-form .field select,
   .todo-form .field textarea {
+    font-size: 16px;
+  }
+
+  #todoImportJson {
     font-size: 16px;
   }
 

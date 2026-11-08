@@ -593,6 +593,22 @@
     todoEmpty: $("#todoEmpty"),
     todoAddBtn: $("#todoAddBtn"),
     todoSeedBtn: $("#todoSeedBtn"),
+    todoImportJumpBtn: $("#todoImportJumpBtn"),
+    todoImportPanel: $("#todoImportPanel"),
+    todoPromptText: $("#todoPromptText"),
+    todoCopyPromptBtn: $("#todoCopyPromptBtn"),
+    todoImportJson: $("#todoImportJson"),
+    todoParseBtn: $("#todoParseBtn"),
+    todoImportClearBtn: $("#todoImportClearBtn"),
+    todoImportError: $("#todoImportError"),
+    todoImportPreview: $("#todoImportPreview"),
+    todoPreviewMeta: $("#todoPreviewMeta"),
+    todoPreviewBody: $("#todoPreviewBody"),
+    todoDups: $("#todoDups"),
+    todoDupSummary: $("#todoDupSummary"),
+    todoDupList: $("#todoDupList"),
+    todoConfirmImportBtn: $("#todoConfirmImportBtn"),
+    todoCancelImportBtn: $("#todoCancelImportBtn"),
     todoEditor: $("#todoEditor"),
     todoForm: $("#todoForm"),
     todoId: $("#todoId"),
@@ -1734,6 +1750,398 @@
         dueNote: t.dueNote || "",
       };
     });
+  }
+
+  /**
+   * 待办批量导入提示词。字段与 parseTodoImport 的校验严格对应，
+   * 改字段名或取值范围时必须同步改这里，否则用户按提示词生成的数据会导不进来。
+   */
+  const TODO_IMPORT_PROMPT = [
+    "请把下面的任务信息整理成待办清单 JSON。",
+    "",
+    "只接受 JSON，请严格遵守以下规则：",
+    "1. 只输出一个 JSON 数组，即使只有 1 条也要用 [ ] 包起来：第一个字符是 [，最后一个字符是 ]。",
+    "2. 不要输出任何解释、开场白、结尾语，也不要用 ```json 代码块包裹。",
+    "3. 每条待办只能有 title、cat、due、dueTime、pri、note、link 七个字段，不要添加其它字段。",
+    "4. title：必填，任务标题原文，不要加序号，不要超过 120 字。",
+    "5. cat：类别，只接受 study、contest、event、other 四个值（分别对应 学业、竞赛、赛事、其他）。",
+    "6. due：截止日期，只接受 YYYY-MM-DD，例如 2026-11-11；不确定就留空字符串 \"\"。",
+    "7. dueTime：可选截止时间，只接受 HH:mm（24 小时制，00:00–23:59），例如 09:30；不确定就留空字符串 \"\"。",
+    "8. pri：优先级，只接受 P0、P1、P2 三个值；不确定就留空字符串 \"\"。",
+    "9. note：备注，可选；没有就留空字符串 \"\"。",
+    "10. link：关联链接，可选；只写 http:// 或 https:// 开头的完整网址；没有就留空字符串 \"\"。",
+    "11. 拿不准的字段一律留空字符串 \"\"，不要编造日期、时间、链接或备注。",
+    "12. 不要输出 done、id、createdAt 等其它字段。",
+    "",
+    "输出示例（照这个结构，不要照抄内容）：",
+    "[",
+    '  {"title": "计算机专业英语期末大作业", "cat": "study", "due": "2026-11-11", "dueTime": "18:00", "pri": "P0", "note": "先完成双语总结文档", "link": ""},',
+    '  {"title": "提交米兰设计周作品", "cat": "contest", "due": "2027-01-18", "dueTime": "", "pri": "P2", "note": "", "link": "https://example.com"}',
+    "]",
+    "",
+    "任务信息：",
+    "<把任务原文粘在这里>",
+  ].join("\n");
+
+  // 类别既接受内部 key，也接受提示词里出现的中文标签
+  const TODO_IMPORT_CAT_MAP = {
+    study: "study",
+    学业: "study",
+    contest: "contest",
+    竞赛: "contest",
+    event: "event",
+    赛事: "event",
+    other: "other",
+    其他: "other",
+  };
+
+  let pendingTodoImport = null; // 预览通过、尚未确认写入的批次
+
+  /** 去重键：标题 + 截止日期（需求明确只看这两项） */
+  function todoDupKey(t) {
+    const title = String((t && t.title) || "")
+      .trim()
+      .replace(/\s+/g, " ");
+    const due = String((t && t.due) || "").trim();
+    return title + "\u0000" + due;
+  }
+
+  function isValidTodoDate(s) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const y = Number(s.slice(0, 4));
+    const mo = Number(s.slice(5, 7));
+    const d = Number(s.slice(8, 10));
+    if (y < 1900 || y > 2999) return false;
+    const dt = new Date(y, mo - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+  }
+
+  /**
+   * 解析待办导入内容。支持单条对象、对象数组、整份导出文件（顶层 todos 或 data.todos）。
+   * 返回 { error } 或 { items, skipped }；items 是去掉重复后真正要新增的条目。
+   */
+  function parseTodoImport(raw) {
+    let text = String(raw == null ? "" : raw).trim();
+    if (!text) {
+      return {
+        error: "粘贴框是空的。先点「复制提示词」，把任务原文发给 AI，再把返回的 JSON 粘进来。",
+      };
+    }
+    // 兼容 AI 偶尔加的 ```json 包裹
+    text = text
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      const msg = String((err && err.message) || "解析失败");
+      const m = msg.match(/position\s+(\d+)/i);
+      let where = "";
+      if (m) {
+        where = "（" + locatePos(text, parseInt(m[1], 10)) + " 附近）";
+      } else {
+        const bad = findBracketMismatch(text);
+        if (bad) where = "（" + locatePos(text, bad.index) + " 附近：" + bad.why + "）";
+      }
+      return {
+        error:
+          "不是合法 JSON" +
+          where +
+          "：" +
+          msg +
+          "。常见原因：夹带了说明文字、末尾多了逗号、用了中文引号。",
+      };
+    }
+
+    let list = null;
+    let source = "object";
+    if (Array.isArray(data)) {
+      list = data;
+      source = "array";
+    } else if (data && typeof data === "object") {
+      if (Array.isArray(data.todos)) {
+        list = data.todos;
+        source = "todos";
+      } else if (data.data && Array.isArray(data.data.todos)) {
+        list = data.data.todos;
+        source = "data.todos";
+      } else if (typeof data.title === "string") {
+        list = [data];
+        source = "single";
+      } else {
+        return {
+          error:
+            "JSON 顶层是对象，但里面没有 todos 数组，也没有 title 字段。可以粘单条 {...}、数组 [...]，或整份导出文件。",
+        };
+      }
+    } else {
+      return {
+        error:
+          "JSON 顶层必须是对象 {...} 或数组 [...]，现在是 " +
+          (data === null ? "null" : typeof data) +
+          "。",
+      };
+    }
+
+    if (!list.length) {
+      return { error: "没有可导入的待办：列表是空的。" };
+    }
+    if (list.length > 500) {
+      return {
+        error: "一次最多导入 500 条，当前 " + list.length + " 条，请分批粘贴。",
+      };
+    }
+
+    const errors = [];
+    const parsed = [];
+
+    list.forEach(function (item, i) {
+      const path =
+        source === "array"
+          ? "[" + i + "]"
+          : source === "todos"
+          ? "todos[" + i + "]"
+          : source === "data.todos"
+          ? "data.todos[" + i + "]"
+          : "对象";
+      const at = "第 " + (i + 1) + " 条（" + path + "）";
+
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        errors.push(
+          at + ' 不是对象，应形如 {"title":"提交作业","cat":"study","due":"2026-11-11"}'
+        );
+        return;
+      }
+
+      let bad = false;
+      const title =
+        typeof item.title === "string" ? item.title.trim().replace(/\s+/g, " ").slice(0, 120) : "";
+      if (!title) {
+        errors.push(at + " 缺少 title 字段（任务标题必填，且不能为空）。");
+        bad = true;
+      }
+
+      let cat = "other";
+      if (item.cat !== undefined && item.cat !== null && item.cat !== "") {
+        const catKey = typeof item.cat === "string" ? item.cat.trim() : "";
+        if (!catKey || !TODO_IMPORT_CAT_MAP[catKey]) {
+          errors.push(
+            at +
+              " 的 cat 字段非法：" +
+              JSON.stringify(item.cat) +
+              "；只接受 study / contest / event / other（学业 / 竞赛 / 赛事 / 其他）。"
+          );
+          bad = true;
+        } else {
+          cat = TODO_IMPORT_CAT_MAP[catKey];
+        }
+      }
+
+      let due = "";
+      if (item.due !== undefined && item.due !== null && item.due !== "") {
+        const dueKey = typeof item.due === "string" ? item.due.trim() : "";
+        if (!dueKey || !isValidTodoDate(dueKey)) {
+          errors.push(
+            at +
+              " 的 due 字段非法：" +
+              JSON.stringify(item.due) +
+              "；只接受 YYYY-MM-DD（真实存在的日期），例如 2026-11-11。"
+          );
+          bad = true;
+        } else {
+          due = dueKey;
+        }
+      }
+
+      let dueTime = "";
+      if (item.dueTime !== undefined && item.dueTime !== null && item.dueTime !== "") {
+        const norm = typeof item.dueTime === "string" ? normalizeTodoTime(item.dueTime) : null;
+        if (!norm) {
+          errors.push(
+            at +
+              " 的 dueTime 字段非法：" +
+              JSON.stringify(item.dueTime) +
+              "；只接受 HH:mm（00:00–23:59）。"
+          );
+          bad = true;
+        } else {
+          dueTime = norm;
+        }
+      }
+
+      let pri = "P1";
+      if (item.pri !== undefined && item.pri !== null && item.pri !== "") {
+        const priKey = typeof item.pri === "string" ? item.pri.trim().toUpperCase() : "";
+        if (TODO_PRI.indexOf(priKey) < 0) {
+          errors.push(
+            at + " 的 pri 字段非法：" + JSON.stringify(item.pri) + "；只接受 P0 / P1 / P2。"
+          );
+          bad = true;
+        } else {
+          pri = priKey;
+        }
+      }
+
+      let note = "";
+      if (item.note !== undefined && item.note !== null) {
+        if (typeof item.note !== "string") {
+          errors.push(at + " 的 note 字段必须是字符串，现在是 " + typeof item.note + "。");
+          bad = true;
+        } else {
+          note = item.note.trim().slice(0, 500);
+        }
+      }
+
+      let link = "";
+      if (item.link !== undefined && item.link !== null && item.link !== "") {
+        if (typeof item.link !== "string" || !/^https?:\/\//i.test(item.link.trim())) {
+          errors.push(
+            at +
+              " 的 link 字段非法：" +
+              JSON.stringify(item.link) +
+              "；只接受 http:// 或 https:// 开头的完整网址。"
+          );
+          bad = true;
+        } else {
+          link = item.link.trim().slice(0, 300);
+        }
+      }
+
+      if (!bad) parsed.push({ title: title, cat: cat, due: due, dueTime: dueTime, pri: pri, note: note, link: link });
+    });
+
+    if (errors.length) {
+      const head = errors.slice(0, 5).join("\n");
+      const more =
+        errors.length > 5
+          ? "\n……还有 " + (errors.length - 5) + " 处问题，先修正上面这些再试。"
+          : "";
+      return { error: head + more };
+    }
+
+    const existing = {};
+    (state.todos || []).forEach(function (t) {
+      existing[todoDupKey(t)] = true;
+    });
+    const seen = {};
+    const items = [];
+    const skipped = [];
+    parsed.forEach(function (t) {
+      const key = todoDupKey(t);
+      if (existing[key]) {
+        skipped.push({ title: t.title, reason: "existing" });
+      } else if (seen[key]) {
+        skipped.push({ title: t.title, reason: "input" });
+      } else {
+        seen[key] = true;
+        items.push(t);
+      }
+    });
+
+    return { items: items, skipped: skipped };
+  }
+
+  function renderTodoImportPreview(res) {
+    el.todoPreviewMeta.textContent =
+      "将新增 " +
+      res.items.length +
+      " 条" +
+      (res.skipped.length ? " · 跳过 " + res.skipped.length + " 条重复" : " · 没有发现重复") +
+      "（标题 + 截止日期相同视为重复）";
+
+    el.todoPreviewBody.innerHTML = res.items.length
+      ? res.items
+          .map(function (t) {
+            const due = t.due ? escapeHtml(t.due) + (t.dueTime ? " " + escapeHtml(t.dueTime) : "") : "待确认";
+            return (
+              "<tr><td>" +
+              escapeHtml(t.title) +
+              "</td><td>" +
+              escapeHtml(TODO_CATS[t.cat] || "其他") +
+              "</td><td>" +
+              due +
+              "</td><td>" +
+              escapeHtml(t.pri) +
+              "</td></tr>"
+            );
+          })
+          .join("")
+      : '<tr><td colspan="4">没有可新增的待办，重复项已在下方列出。</td></tr>';
+
+    if (res.skipped.length) {
+      el.todoDups.hidden = false;
+      el.todoDupSummary.textContent = "查看跳过的 " + res.skipped.length + " 条重复";
+      el.todoDupList.innerHTML = res.skipped
+        .map(function (s) {
+          return (
+            "<li>" +
+            escapeHtml(s.title) +
+            (s.reason === "input" ? "（本次 JSON 内重复）" : "（清单里已有相同标题与截止日期）") +
+            "</li>"
+          );
+        })
+        .join("");
+    } else {
+      el.todoDups.hidden = true;
+      el.todoDupList.innerHTML = "";
+    }
+
+    el.todoConfirmImportBtn.disabled = !res.items.length;
+    el.todoImportPreview.hidden = false;
+  }
+
+  function runTodoImportPreview() {
+    pendingTodoImport = null;
+    el.todoImportError.hidden = true;
+    el.todoImportPreview.hidden = true;
+    const res = parseTodoImport(el.todoImportJson.value);
+    if (res.error) {
+      el.todoImportError.textContent = res.error;
+      el.todoImportError.hidden = false;
+      el.todoImportJson.focus();
+      return;
+    }
+    pendingTodoImport = res;
+    renderTodoImportPreview(res);
+  }
+
+  function clearTodoImport() {
+    pendingTodoImport = null;
+    el.todoImportJson.value = "";
+    el.todoImportError.hidden = true;
+    el.todoImportPreview.hidden = true;
+    el.todoDups.hidden = true;
+    el.todoDupList.innerHTML = "";
+    el.todoConfirmImportBtn.disabled = false;
+  }
+
+  function confirmTodoImport() {
+    const p = pendingTodoImport;
+    if (!p || !p.items.length) return;
+    state.todos = state.todos || [];
+    p.items.forEach(function (t) {
+      state.todos.push({
+        id: makeId(),
+        title: t.title,
+        cat: t.cat,
+        due: t.due,
+        dueTime: t.dueTime,
+        pri: t.pri,
+        done: false,
+        doneAt: null,
+        note: t.note,
+        link: t.link,
+      });
+    });
+    const added = p.items.length;
+    const skipped = p.skipped.length;
+    clearTodoImport();
+    saveTodos(
+      "已导入 " + added + " 条待办" + (skipped ? "，跳过 " + skipped + " 条重复" : "")
+    );
   }
 
   function renderStreak() {
@@ -4234,6 +4642,32 @@
     setView("todo");
   });
 
+  // ---------- 待办批量导入 ----------
+  el.todoImportJumpBtn.addEventListener("click", function () {
+    el.todoImportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.todoImportJson.focus({ preventScroll: true });
+  });
+
+  el.todoCopyPromptBtn.addEventListener("click", function () {
+    copyText(TODO_IMPORT_PROMPT).then(function (ok) {
+      toast(ok ? "待办提示词已复制" : "复制失败，请手动选中提示词复制");
+    });
+  });
+
+  el.todoParseBtn.addEventListener("click", runTodoImportPreview);
+
+  el.todoImportClearBtn.addEventListener("click", clearTodoImport);
+  el.todoCancelImportBtn.addEventListener("click", clearTodoImport);
+
+  el.todoImportJson.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      runTodoImportPreview();
+    }
+  });
+
+  el.todoConfirmImportBtn.addEventListener("click", confirmTodoImport);
+
   el.todoCatFilter.addEventListener("change", function () {
     todoCatFilter = el.todoCatFilter.value;
     renderTodos();
@@ -4786,6 +5220,7 @@
 
   applyBranding();
   el.promptText.textContent = BILI_PROMPT;
+  el.todoPromptText.textContent = TODO_IMPORT_PROMPT;
   initSupa();
 
   renderAll();

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人学业工作台：记录课程学习、待办清单与日程安排">
   <title>学业工作台</title>
-  <link rel="stylesheet" href="style.css?v=20261108-7">
+  <link rel="stylesheet" href="style.css?v=20261108-8">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -144,6 +144,7 @@
           <div class="todo-head-actions">
             <button type="button" class="btn primary" id="todoAddBtn">+ 新增待办</button>
             <button type="button" class="btn ghost" id="todoSeedBtn">导入当前待办</button>
+            <button type="button" class="btn ghost" id="todoImportJumpBtn">批量导入</button>
           </div>
         </div>
 
@@ -172,6 +173,58 @@
 
         <ul class="todo-list" id="todoList"></ul>
         <div class="todo-empty state-box" id="todoEmpty" data-kind="empty" hidden></div>
+      </section>
+
+      <section class="panel reveal" id="todoImportPanel" aria-labelledby="todoImportTitle">
+        <div class="panel-head">
+          <div>
+            <h2 id="todoImportTitle">待办批量导入</h2>
+            <p class="panel-cap">让 AI 把任务整理成 JSON；先预览新增与重复，再确认写入。标题 + 截止日期相同的会跳过</p>
+          </div>
+        </div>
+
+        <div class="import-step">
+          <p class="step-cap"><span class="step-no mono">①</span>复制提示词，连同任务原文一起发给任意 AI（DeepSeek、豆包、ChatGPT 都行）</p>
+          <div class="prompt-box">
+            <pre class="prompt-text mono" id="todoPromptText"></pre>
+            <button type="button" class="btn ghost prompt-copy" id="todoCopyPromptBtn">复制提示词</button>
+          </div>
+        </div>
+
+        <div class="import-step">
+          <p class="step-cap"><span class="step-no mono">②</span>把 AI 返回的 JSON 粘到下面：支持单条、数组，或整份导出文件（读取其中的 todos）</p>
+          <textarea id="todoImportJson" class="bili-json mono" rows="5" spellcheck="false" aria-label="粘贴待办 JSON"
+            placeholder='[{"title":"提交作业","cat":"study","due":"2026-11-11","dueTime":"18:00","pri":"P0","note":"","link":""}]'></textarea>
+          <div class="import-actions">
+            <button type="button" class="btn primary" id="todoParseBtn">解析并预览</button>
+            <button type="button" class="btn ghost" id="todoImportClearBtn">清空</button>
+          </div>
+          <div class="import-error mono" id="todoImportError" role="alert" hidden></div>
+        </div>
+
+        <div class="import-preview" id="todoImportPreview" hidden>
+          <div class="preview-head">
+            <h3 id="todoPreviewTitle">待办导入预览</h3>
+            <p class="preview-meta mono" id="todoPreviewMeta"></p>
+          </div>
+          <div class="preview-table-wrap">
+            <table class="preview-table">
+              <thead>
+                <tr><th>标题</th><th>类别</th><th>截止</th><th>优先级</th></tr>
+              </thead>
+              <tbody id="todoPreviewBody"></tbody>
+            </table>
+          </div>
+          <details class="todo-dups" id="todoDups" hidden>
+            <summary id="todoDupSummary"></summary>
+            <ul id="todoDupList"></ul>
+          </details>
+          <p class="dup-rule">去重规则：标题 + 截止日期相同即视为重复；重复项跳过，不覆盖现有待办的内容。</p>
+          <div class="import-actions">
+            <button type="button" class="btn primary" id="todoConfirmImportBtn">确认导入</button>
+            <button type="button" class="btn ghost" id="todoCancelImportBtn">取消</button>
+          </div>
+        </div>
       </section>
     </div><!-- /viewTodo -->
 
@@ -445,7 +498,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-7"></script>
+  <script src="app.js?v=20261108-8"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {
