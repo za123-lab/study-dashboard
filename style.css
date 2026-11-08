@@ -2015,6 +2015,15 @@ input:focus {
   color: var(--ink-soft);
 }
 
+.today-min-cap {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 .today-min b {
   display: block;
   font-size: 26px;
@@ -2026,6 +2035,7 @@ input:focus {
   font-style: normal;
   font-size: 11px;
   letter-spacing: 0.08em;
+  color: var(--ink-soft);
 }
 
 .today-list {
