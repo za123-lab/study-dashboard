@@ -40,10 +40,6 @@
   let toastTimer = null;
   let pendingImport = null; // 已解析、待确认写入的 B 站课程
 
-  // 展开状态的课程 id（只在内存里，不写入存储）
-  const openIds = new Set();
-  const seenIds = new Set();
-
   // 云同步运行状态（Supabase 配置、登录态、云端版本号都存 localStorage）
   let supaCfg = null; // { url, anonKey, auto }
   let supaSession = null; // { accessToken, refreshToken, expiresAt, userId, email }
@@ -242,6 +238,7 @@
       details: {},
       demoDetails: {},
       todos: [],
+      courseOpen: {},
     };
   }
 
@@ -451,6 +448,19 @@
         return Array.isArray(c.lessons) ? cleanCourseV2(c) : migrateCourseV1(c);
       });
 
+    // 课程卡片展开状态：只保留仍然存在的课程；旧数据没有这个字段时全部默认收起
+    const courseOpen = {};
+    const rawOpen =
+      data.courseOpen && typeof data.courseOpen === "object" ? data.courseOpen : {};
+    const courseIds = new Set(
+      courses.map(function (c) {
+        return c.id;
+      })
+    );
+    Object.keys(rawOpen).forEach(function (id) {
+      if (rawOpen[id] === true && courseIds.has(id)) courseOpen[id] = true;
+    });
+
     const rawActivity =
       data.activity && typeof data.activity === "object" ? data.activity : {};
     const activity = {};
@@ -484,6 +494,7 @@
       details: cleanDetails(data.details),
       demoDetails: cleanDetails(data.demoDetails),
       todos: cleanTodos(data.todos),
+      courseOpen: courseOpen,
     };
   }
 
@@ -592,8 +603,6 @@
     todoList: $("#todoList"),
     todoEmpty: $("#todoEmpty"),
     todoAddBtn: $("#todoAddBtn"),
-    todoSeedBtn: $("#todoSeedBtn"),
-    todoImportJumpBtn: $("#todoImportJumpBtn"),
     todoImportPanel: $("#todoImportPanel"),
     todoPromptText: $("#todoPromptText"),
     todoCopyPromptBtn: $("#todoCopyPromptBtn"),
@@ -784,13 +793,9 @@
     );
   }
 
-  /** 决定课程卡片是否展开；首次出现时按节数决定默认值 */
+  /** 课程卡片是否展开：默认收起，用户手动展开/收起的状态持久化在 state.courseOpen */
   function isCourseOpen(course) {
-    if (!seenIds.has(course.id)) {
-      seenIds.add(course.id);
-      if (course.lessons.length <= 12) openIds.add(course.id);
-    }
-    return openIds.has(course.id);
+    return !!(state.courseOpen && state.courseOpen[course.id]);
   }
 
   function renderCourses() {
@@ -1237,6 +1242,7 @@
   let currentView = "study";
   let todoCatFilter = "all";
   let todoStatusFilter = "all";
+  let todoDoneFoldOpen = false; // 「已完成」分组的展开状态，跨重渲染保持
   const initNow = new Date();
   let calYear = initNow.getFullYear();
   let calMonthIdx = initNow.getMonth();
@@ -1352,6 +1358,58 @@
     return { overdue: overdue, today: todayN, week: week };
   }
 
+  function todoItemHtml(t) {
+    const urgency = todoUrgency(t);
+    const overdue = urgency === "overdue";
+    return (
+      '<li class="todo-item' +
+      (t.done ? " is-done" : "") +
+      (urgency ? " u-" + urgency : "") +
+      '">' +
+      '<label class="todo-check"><input type="checkbox" data-todo-done="' +
+      escapeHtml(t.id) +
+      '"' +
+      (t.done ? " checked" : "") +
+      ' aria-label="标记为' +
+      (t.done ? "未完成" : "已完成") +
+      '"></label>' +
+      '<div class="todo-main">' +
+      '<div class="todo-title-line"><span class="todo-pri pri-' +
+      t.pri +
+      '">' +
+      t.pri +
+      '</span><span class="todo-title">' +
+      escapeHtml(t.title) +
+      "</span></div>" +
+      '<div class="todo-meta"><span class="todo-cat" data-cat="' +
+      t.cat +
+      '">' +
+      TODO_CATS[t.cat] +
+      '</span><span class="todo-due' +
+      (overdue ? " is-overdue" : "") +
+      '">' +
+      escapeHtml(fmtTodoDue(t)) +
+      '</span><span class="todo-left">' +
+      todoLeftText(t) +
+      "</span></div>" +
+      (t.note ? '<p class="todo-note">' + escapeHtml(t.note) + "</p>" : "") +
+      (t.link
+        ? '<a class="todo-link" href="' +
+          escapeHtml(t.link) +
+          '" target="_blank" rel="noopener noreferrer">打开关联链接 ↗</a>'
+        : "") +
+      "</div>" +
+      '<div class="todo-actions">' +
+      '<button type="button" class="mini-btn" data-todo-edit="' +
+      escapeHtml(t.id) +
+      '">编辑</button>' +
+      '<button type="button" class="mini-btn danger" data-todo-del="' +
+      escapeHtml(t.id) +
+      '">删除</button>' +
+      "</div></li>"
+    );
+  }
+
   function renderTodos() {
     const counts = todoCounts();
     el.todoSummary.innerHTML =
@@ -1383,64 +1441,45 @@
       el.todoEmpty.hidden = false;
       el.todoEmpty.innerHTML = (state.todos || []).length
         ? stateContent("没有符合条件的待办", "换个类别或状态筛选看看。")
-        : stateContent("清单还空着", "点「导入当前待办」一次性写入，或自己加一条。");
+        : stateContent("清单还空着", "在下方「待办批量导入」里粘贴 JSON 批量写入，或点「+ 新增待办」。");
       return;
     }
     el.todoEmpty.hidden = true;
 
-    el.todoList.innerHTML = filtered
-      .map(function (t) {
-        const urgency = todoUrgency(t);
-        const overdue = urgency === "overdue";
-        return (
-          '<li class="todo-item' +
-          (t.done ? " is-done" : "") +
-          (urgency ? " u-" + urgency : "") +
-          '">' +
-          '<label class="todo-check"><input type="checkbox" data-todo-done="' +
-          escapeHtml(t.id) +
-          '"' +
-          (t.done ? " checked" : "") +
-          ' aria-label="标记为' +
-          (t.done ? "未完成" : "已完成") +
-          '"></label>' +
-          '<div class="todo-main">' +
-          '<div class="todo-title-line"><span class="todo-pri pri-' +
-          t.pri +
-          '">' +
-          t.pri +
-          '</span><span class="todo-title">' +
-          escapeHtml(t.title) +
-          "</span></div>" +
-          '<div class="todo-meta"><span class="todo-cat" data-cat="' +
-          t.cat +
-          '">' +
-          TODO_CATS[t.cat] +
-          '</span><span class="todo-due' +
-          (overdue ? " is-overdue" : "") +
-          '">' +
-          escapeHtml(fmtTodoDue(t)) +
-          '</span><span class="todo-left">' +
-          todoLeftText(t) +
-          "</span></div>" +
-          (t.note ? '<p class="todo-note">' + escapeHtml(t.note) + "</p>" : "") +
-          (t.link
-            ? '<a class="todo-link" href="' +
-              escapeHtml(t.link) +
-              '" target="_blank" rel="noopener noreferrer">打开关联链接 ↗</a>'
-            : "") +
-          "</div>" +
-          '<div class="todo-actions">' +
-          '<button type="button" class="mini-btn" data-todo-edit="' +
-          escapeHtml(t.id) +
-          '">编辑</button>' +
-          '<button type="button" class="mini-btn danger" data-todo-del="' +
-          escapeHtml(t.id) +
-          '">删除</button>' +
-          "</div></li>"
-        );
-      })
-      .join("");
+    const openItems = filtered.filter(function (t) {
+      return !t.done;
+    });
+    const doneItems = filtered.filter(function (t) {
+      return t.done;
+    });
+
+    // 状态筛选「已完成」时直接平铺，避免筛完还要再点一层折叠才看得到
+    if (todoStatusFilter === "done") {
+      el.todoList.innerHTML = doneItems.map(todoItemHtml).join("");
+      return;
+    }
+
+    let html = openItems.map(todoItemHtml).join("");
+    // 空分组不留盒子；展开状态记住，勾选/取消后重渲染不跳动
+    if (doneItems.length) {
+      html +=
+        '<li class="todo-done-group"><details class="todo-done-fold"' +
+        (todoDoneFoldOpen ? " open" : "") +
+        '><summary class="todo-done-summary"><span class="todo-done-title">已完成 ' +
+        doneItems.length +
+        '</span><span class="todo-done-chev" aria-hidden="true"></span></summary>' +
+        '<ul class="todo-list todo-done-list">' +
+        doneItems.map(todoItemHtml).join("") +
+        "</ul></details></li>";
+    }
+    el.todoList.innerHTML = html;
+
+    const fold = el.todoList.querySelector(".todo-done-fold");
+    if (fold) {
+      fold.addEventListener("toggle", function () {
+        todoDoneFoldOpen = fold.open;
+      });
+    }
   }
 
   // ---------- 日历 ----------
@@ -1688,68 +1727,6 @@
     saveState();
     renderAll();
     if (message) toast(message);
-  }
-
-  /** 初始待办：按用户给定的清单，不来自任何通知 */
-  function initialTodos() {
-    return [
-      {
-        title: "计算机专业英语期末大作业 —— 双语总结文档",
-        cat: "study",
-        due: "2026-11-11",
-        dueTime: "24:00",
-        pri: "P0",
-      },
-      {
-        title: "计算机专业英语期末大作业 —— 7–15 分钟双语讲解视频",
-        cat: "study",
-        due: "2026-11-11",
-        dueTime: "24:00",
-        pri: "P0",
-      },
-      {
-        title: "计算机专业英语期末大作业 —— 英文思维导图（XMind 导出 PNG）",
-        cat: "study",
-        due: "2026-11-11",
-        dueTime: "24:00",
-        pri: "P0",
-      },
-      {
-        title: "职业规划大赛院赛 —— 报名与材料提交",
-        cat: "event",
-        due: "",
-        dueNote: "截止日期待确认",
-        pri: "P1",
-      },
-      {
-        title: "米兰设计周 · 兔宝宝杯家居设计赛 —— 作品视频 + 海报提交",
-        cat: "contest",
-        due: "2027-01-18",
-        dueTime: "",
-        pri: "P2",
-      },
-      {
-        title: "米兰设计周非命题 · 数字媒体 UI 类 —— 最终提交",
-        cat: "contest",
-        due: "",
-        dueNote: "2027 年 4 月（具体日待确认）",
-        pri: "P2",
-      },
-    ].map(function (t) {
-      return {
-        id: makeId(),
-        title: t.title,
-        cat: t.cat,
-        due: t.due,
-        dueTime: t.dueTime || "",
-        pri: t.pri,
-        done: false,
-        doneAt: null,
-        note: "",
-        link: "",
-        dueNote: t.dueNote || "",
-      };
-    });
   }
 
   /**
@@ -2304,8 +2281,7 @@
     subtractDemoActivity();
 
     demoIds.forEach(function (id) {
-      openIds.delete(id);
-      seenIds.delete(id);
+      delete state.courseOpen[id];
     });
 
     saveState();
@@ -2355,6 +2331,7 @@
     state.courses = state.courses.filter(function (c) {
       return c.id !== id;
     });
+    delete state.courseOpen[id];
     saveState();
     renderAll();
     toast("已删除《" + course.name + "》");
@@ -2467,7 +2444,7 @@
     const last = course.lessons[course.lessons.length - 1];
     const totalMin = last && last.totalMin ? last.totalMin : DEFAULT_LESSON_MIN;
     course.lessons.push({ id: makeId(), totalMin: totalMin, watchedMin: 0 });
-    openIds.add(courseId);
+    state.courseOpen[courseId] = true;
     saveState();
     renderAll();
     toast("已添加第 " + course.lessons.length + " 节，点标题可以填名字");
@@ -2940,7 +2917,7 @@
       dup.source = "bili";
       dup.bvid = p.bvid;
       dup.videoTitle = p.title;
-      openIds.add(dup.id);
+      state.courseOpen[dup.id] = true;
       saveState();
       renderAll();
       toast(
@@ -2961,8 +2938,7 @@
         videoTitle: p.title,
       };
       state.courses.push(course);
-      seenIds.add(course.id);
-      openIds.add(course.id);
+      state.courseOpen[course.id] = true;
       saveState();
       renderAll();
       toast(
@@ -3122,6 +3098,7 @@
       details: state.details || {},
       demoDetails: state.demoDetails || {},
       todos: state.todos || [],
+      courseOpen: state.courseOpen || {},
     };
   }
 
@@ -3409,8 +3386,6 @@
     supaMeta.syncedHash = hashState(snapshot());
     supaMeta.lastSyncAt = Date.now();
     saveSupaMeta();
-    seenIds.clear();
-    openIds.clear();
     renderAll();
     setSyncStatus("ok", message || "已拉取云端进度 · " + timeLabel(supaMeta.lastSyncAt));
     return true;
@@ -4621,33 +4596,7 @@
     if (e.target.hasAttribute("data-todo-close")) closeTodoEditor();
   });
 
-  el.todoSeedBtn.addEventListener("click", function () {
-    const fresh = initialTodos();
-    const existing = {};
-    (state.todos || []).forEach(function (t) {
-      existing[t.title] = true;
-    });
-    const missing = fresh.filter(function (t) {
-      return !existing[t.title];
-    });
-    if (!missing.length) {
-      toast("这 6 条待办都已经在清单里了");
-      return;
-    }
-    if (!confirm("将导入 " + missing.length + " 条初始待办，已有的待办不会覆盖。继续吗？")) {
-      return;
-    }
-    state.todos = (state.todos || []).concat(missing);
-    saveTodos("已导入 " + missing.length + " 条待办，原有清单保持不变");
-    setView("todo");
-  });
-
   // ---------- 待办批量导入 ----------
-  el.todoImportJumpBtn.addEventListener("click", function () {
-    el.todoImportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-    el.todoImportJson.focus({ preventScroll: true });
-  });
-
   el.todoCopyPromptBtn.addEventListener("click", function () {
     copyText(TODO_IMPORT_PROMPT).then(function (ok) {
       toast(ok ? "待办提示词已复制" : "复制失败，请手动选中提示词复制");
@@ -4801,11 +4750,12 @@
     const toggle = e.target.closest(".course-toggle");
     if (toggle) {
       const id = toggle.dataset.cid;
-      if (openIds.has(id)) {
-        openIds.delete(id);
+      if (state.courseOpen[id]) {
+        delete state.courseOpen[id];
       } else {
-        openIds.add(id);
+        state.courseOpen[id] = true;
       }
+      saveState();
       renderCourses();
       return;
     }
@@ -5087,8 +5037,6 @@
     state.demoDetails = demoDetails;
 
     saveState();
-    seenIds.clear();
-    openIds.clear();
     renderAll();
     toast("已填入示例课程（带「示例」标记），随时可以一键清除");
   });
@@ -5115,6 +5063,7 @@
         details: state.details || {},
         demoDetails: state.demoDetails || {},
         todos: state.todos || [],
+        courseOpen: state.courseOpen || {},
       },
       null,
       2
@@ -5160,8 +5109,6 @@
       }
       state = data;
       saveState();
-      seenIds.clear();
-      openIds.clear();
       renderAll();
       toast(
         "导入成功，共 " +
@@ -5197,8 +5144,6 @@
     }
     state = emptyState();
     saveState();
-    seenIds.clear();
-    openIds.clear();
     renderAll();
     toast("已清空课程、打卡和待办，本子重新开张");
   });

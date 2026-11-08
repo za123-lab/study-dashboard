@@ -2175,6 +2175,68 @@ input:focus {
   gap: 8px;
 }
 
+/* 待办批量导入：整块可折叠，默认收起，避免首屏被表单占满 */
+.todo-import-panel {
+  padding: 0;
+}
+
+.todo-import-panel > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-height: 56px;
+  padding: 16px 24px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.todo-import-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.todo-import-panel > summary::marker {
+  content: "";
+}
+
+.todo-import-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.todo-import-hint {
+  flex: 1 1 220px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.todo-import-chev {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft);
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+
+.todo-import-panel[open] .todo-import-chev {
+  transform: rotate(-135deg);
+}
+
+.todo-import-body {
+  padding: 6px 24px 24px;
+  border-top: 1px dashed var(--line);
+}
+
+.todo-import-panel > summary:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: -2px;
+}
+
 .todo-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2272,6 +2334,60 @@ input:focus {
 .todo-item.is-done .todo-title {
   text-decoration: line-through;
   text-decoration-color: var(--ink-faint);
+}
+
+/* 「已完成」分组：默认折叠，展开后按普通待办卡片显示 */
+.todo-done-group {
+  list-style: none;
+}
+
+.todo-done-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  list-style: none;
+  border-top: 1px dashed var(--line);
+}
+
+.todo-done-summary::-webkit-details-marker {
+  display: none;
+}
+
+.todo-done-summary::marker {
+  content: "";
+}
+
+.todo-done-title {
+  flex: 1 1 auto;
+}
+
+.todo-done-chev {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--ink-soft);
+  border-bottom: 1.5px solid var(--ink-soft);
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+
+.todo-done-fold[open] .todo-done-chev {
+  transform: rotate(-135deg);
+}
+
+.todo-done-list {
+  margin-top: 8px;
+}
+
+.todo-done-summary:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: -2px;
 }
 
 .todo-check {
@@ -2802,6 +2918,18 @@ input:focus {
   .todo-head-actions .btn {
     flex: 1 1 140px;
     min-height: 44px;
+  }
+
+  .todo-import-panel > summary {
+    padding: 14px 18px;
+  }
+
+  .todo-import-body {
+    padding: 4px 18px 20px;
+  }
+
+  .todo-done-summary {
+    min-height: 48px;
   }
 
   .todo-item {
