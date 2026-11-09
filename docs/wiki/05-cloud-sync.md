@@ -136,12 +136,12 @@ Accept: application/json
 
 ```js
 function snapshot() {
-  return { v: 2, schemaVersion: 3, courses, activity, demoActivity,
-           details, demoDetails, todos, courseOpen, panelOpen };
+  return { v: 2, schemaVersion: 4, courses, activity, demoActivity,
+           details, demoDetails, todos, checkins, courseOpen, panelOpen };
 }
 ```
 
-- 快照**包含**示例数据、明细、待办、展开状态，确保跨设备完全一致；
+- 快照**包含**示例数据、明细、待办、循环打卡、展开状态，确保跨设备完全一致；
 - `canonical(value)` 对对象键递归排序后序列化；
 - `hashState()` 用 djb2（`h*33 + code`）生成 `base36:长度`，只用于**判断本地是否较上次同步有变化**（`localDirty()`），不用于密码学校验；
 - `supaMeta.syncedHash` 在每次成功上传 / 应用云端后更新。
@@ -151,7 +151,7 @@ function snapshot() {
 ```
 1. schemaTooNew → 停止并提示刷新
 2. fetchRemote()
-3. 云端 schemaVersion > 3 → 停止自动上传，暂停自动拉取
+3. 云端 schemaVersion > 4 → 停止自动上传，暂停自动拉取
 4. 云端 rev !== baseRev → showConflict("上传前发现云端已更新")，不写
 5. 云端不存在但 baseRev > 0 → 云端行被删，baseRev 归零，走首次插入
 6. baseRev = 0 → insertRemote()

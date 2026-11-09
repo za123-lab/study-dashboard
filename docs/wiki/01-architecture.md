@@ -117,6 +117,7 @@ sanitize(data)
    ├── activity ：日期键校验；v1 的「集数」×45 折算成分钟
    ├── details / demoDetails → cleanDetails（同日同课时合并）
    ├── todos → cleanTodos（字段白名单 + 兜底默认值）
+   ├── checkins → cleanCheckins（周期/类型兜底，清掉失效的课程引用）
    └── courseOpen / panelOpen → 只保留有效键
    ↓
 state（规范化后的 v2 结构）
@@ -163,10 +164,11 @@ markSynced(row) → 记录 baseRev / syncedHash / lastSyncAt
 | --- | --- | --- | --- |
 | 时间与日期工具 | `app.js` 顶部 | 分钟/时长格式化、日期键、周数、热力档位 | `fmtDur` `parseDuration` `dateKey` `todayKey` `addDays` `minuteLevel` |
 | 统计 | `app.js` 顶部 | 单节百分比、课程与总体加权进度 | `lessonPct` `courseStats` `overallStats` |
-| 存储与校验 | `app.js` 存储区 | 读入、迁移、白名单清洗、落盘 | `loadState` `saveState` `sanitize` `cleanCourseV2` `cleanDetails` `cleanTodos` |
+| 存储与校验 | `app.js` 存储区 | 读入、迁移、白名单清洗、落盘 | `loadState` `saveState` `sanitize` `cleanCourseV2` `cleanDetails` `cleanTodos` `cleanCheckins` |
 | 学习视图 | `app.js` 渲染区 | 今日摘要、统计卡、课程卡片、热力图、示例提示 | `renderToday` `renderStats` `renderCourses` `renderHeatmap` |
 | 当日详情 | `app.js` 渲染区 | 热力图/日历点开某天，展示学习明细与当天待办 | `openDayDetail` `describeDetail` `todosOnDay` |
 | 待办 | `app.js` 待办区 | 清单渲染、筛选、计数、紧急度、增删改、批量导入 | `renderTodos` `sortedTodos` `parseTodoImport` `confirmTodoImport` |
+| 循环打卡 | `app.js` 打卡区 | 周任务/间隔任务判定、列表渲染、新建编辑、按课时进度打卡 | `checkinCycle` `renderCheckins` `openCheckinSheet` `runCheckin` |
 | 日历 | `app.js` 日历区 | 月历网格、手机列表、月度统计、日期点击 | `renderCalendar` `shiftMonth` `calUrgency` |
 | 视图切换 | `app.js` 视图区 | 惰性渲染、滚动位置恢复、键盘切换 | `setView` `bindTabKeys` |
 | 课程操作 | `app.js` 数据操作区 | 增删课程/课时、改时长、加 15 分、看完、改标题 | `addCourse` `removeCourse` `commitLessonField` `applyLessonAction` |

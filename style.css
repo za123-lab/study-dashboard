@@ -342,6 +342,7 @@ h1 {
   border: 0;
   font: inherit;
   cursor: default;
+  position: relative;
   border-radius: 2px;
   background: rgba(32, 52, 78, 0.045);
   box-shadow: inset 0 0 0 1px rgba(32, 52, 78, 0.07);
@@ -393,6 +394,7 @@ h1 {
 
 .heat-legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   margin-top: 14px;
@@ -409,6 +411,13 @@ h1 {
 
 .heat-legend span {
   margin: 0 4px;
+}
+
+.heat-legend-tip {
+  margin-left: 10px;
+  font-style: normal;
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
 
 /* 打卡失去课程支撑时的提示条 */
@@ -1603,6 +1612,39 @@ input:focus {
   color: var(--red-deep);
 }
 
+.day-metrics {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+/* 只有待办/打卡、没有视频：细红框；同时还有视频：右下角小圆点，颜色深浅仍只表示视频时长 */
+.heatmap .cell.has-stats:not(.has-data) {
+  box-shadow: inset 0 0 0 1px rgba(192, 69, 58, 0.4);
+}
+
+/* 右下圆点：有视频且另有待办/打卡，颜色按条数（1 / 2 / 3+）由浅到深 */
+.heatmap .cell.has-stats.has-data::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #eda498;
+  box-shadow: 0 0 0 1px var(--paper-2), 0 0 0 1.6px rgba(32, 52, 78, 0.32);
+  pointer-events: none;
+}
+
+.heatmap .cell.has-stats.has-data.d2::after {
+  background: var(--red);
+}
+
+.heatmap .cell.has-stats.has-data.d3::after {
+  background: #7f1f17;
+}
+
 .day-demo {
   margin: 8px 0 0;
   padding: 7px 10px;
@@ -2233,19 +2275,42 @@ input:focus {
   letter-spacing: 0.04em;
 }
 
-.today-min {
+.today-metrics {
+  display: flex;
   flex: 0 0 auto;
-  text-align: right;
-  color: var(--ink-soft);
+  align-items: flex-end;
+  gap: 14px;
 }
 
-.today-min-cap {
-  display: block;
-  margin-bottom: 2px;
+.today-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule);
+}
+
+.today-figure b {
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.today-figure i {
+  font-style: normal;
   font-size: 10.5px;
   letter-spacing: 0.04em;
   color: var(--ink-soft);
   white-space: nowrap;
+}
+
+.today-min {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  color: var(--ink-soft);
 }
 
 .today-min b {
@@ -2257,9 +2322,10 @@ input:focus {
 
 .today-min i {
   font-style: normal;
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
   color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .today-list {
@@ -2968,6 +3034,21 @@ input:focus {
   color: var(--ink-soft);
 }
 
+.cal-stats {
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
+}
+
+.cal-row-min i {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
 .cal-list {
   display: none;
 }
@@ -3175,6 +3256,18 @@ input:focus {
 
   .today-min b {
     font-size: 24px;
+  }
+
+  .today-metrics {
+    gap: 10px;
+  }
+
+  .today-figure {
+    padding-left: 10px;
+  }
+
+  .today-figure b {
+    font-size: 17px;
   }
 
   .today-foot {
@@ -3411,6 +3504,180 @@ input:focus {
   .todo-form .modal-actions .btn {
     flex: 1 1 120px;
     min-height: 44px;
+  }
+}
+
+/* ---------- 循环打卡 ---------- */
+
+.checkin-panel {
+  margin-bottom: 26px;
+}
+
+.checkin-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.checkin-head-text {
+  min-width: 0;
+}
+
+.checkin-new {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.checkin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkin-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 16px;
+  background: rgba(32, 52, 78, 0.02);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.checkin-item.is-done {
+  background: rgba(192, 69, 58, 0.035);
+  border-color: rgba(192, 69, 58, 0.22);
+}
+
+.checkin-main {
+  min-width: 0;
+}
+
+.checkin-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.checkin-mark {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.checkin-item.is-done .checkin-mark {
+  color: var(--red);
+}
+
+.checkin-name {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkin-meta,
+.checkin-status {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+.checkin-status {
+  color: var(--ink-soft);
+}
+
+.checkin-status.is-done {
+  color: var(--red-deep);
+}
+
+.checkin-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkin-go {
+  padding: 7px 14px;
+  font-size: 12.5px;
+}
+
+.checkin-go:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.checkin-empty {
+  margin: 16px 0 0;
+  padding: 16px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--ink-faint);
+  text-align: center;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+}
+
+.checkin-form-note {
+  margin: 0;
+}
+
+.checkin-progress {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-soft);
+  background: rgba(32, 52, 78, 0.025);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+}
+
+.checkin-progress b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .checkin-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .checkin-new {
+    align-self: flex-start;
+  }
+
+  .checkin-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .checkin-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .checkin-actions .btn,
+  .checkin-actions .mini-btn {
+    min-height: 44px;
+  }
+
+  .checkin-actions .checkin-go {
+    flex: 1 1 100px;
   }
 }
 

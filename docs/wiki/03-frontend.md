@@ -146,17 +146,18 @@
 
 | 函数 | 行为 |
 | --- | --- |
-| `renderToday()` | 今日分钟、今日待办（最多 3 条，逾期优先）、最近截止项 |
+| `renderToday()` | 今日量化（视频时长 / 完成待办数 / 打卡次数）、今日待办（最多 3 条，逾期优先）、最近截止项 |
 | `renderStats()` | 三个统计卡 + 圆环 `--p` 与 `aria-label` |
 | `renderCourses()` | 空状态显隐；课程列表整体重建 |
 | `courseCardHtml(course)` | 课程卡片：标题、B 站视频行、加权 meta、删除按钮、进度条、展开按钮、课时列表、添加一节 |
 | `lessonLabel(lesson, idx)` | 有标题用标题；带 `page` 且标题未含 `P{n}` 时补 `P{n}` 前缀 |
 | `lessonRowHtml(course, lesson, idx)` | 课时行：标题（可点击编辑）、总时长 / 已看输入框、进度条、百分比、`+15 分` / `看完` / `删除` / B 站链接 |
-| `renderHeatmap()` | 按周生成 7×N 的按钮网格；未来日期禁用；有记录或明细的日期可打开 |
+| `renderHeatmap()` | 按周生成 7×N 的按钮网格；未来日期禁用；有视频、明细、完成待办或打卡的日期都可打开，`has-stats` 加细红框 |
+| `dayStats(key)` | 单日量化：`{ done, checkins }`；按 `todos.doneAt` 与 `checkins.logs[].date` 统计 |
 | `hasDayDetails(key)` | 真实明细或示例明细是否存在 |
 | `dayLabel(key)` | `"2026 年 11 月 7 日 · 星期五"` |
 | `describeDetail(entry)` | 明细 → 课程名 / 课时名 / 当前进度（含课程或课时已删除的降级文案） |
-| `openDayDetail(key, cell, forceOpen)` | 打开当日弹层：学习明细 + 当天待办；记录返回焦点 |
+| `openDayDetail(key, cell, forceOpen)` | 打开当日弹层：视频时长 + 完成待办/打卡次数 + 明细 + 当天待办 + 当天打卡；记录返回焦点 |
 | `closeDayDetail()` | 隐藏弹层并把焦点还给触发元素 |
 | `todosOnDay(key)` | 某天的待办，按完成状态 → 紧急度 → 截止时刻 → 优先级排序 |
 
@@ -175,17 +176,32 @@
 | `todoItemHtml(t)` | 单条待办 HTML：勾选框、优先级、标题、类别、截止、剩余、备注、链接、编辑/删除 |
 | `renderTodos()` | 计数条 + 筛选 + 未完成列表 + 「已完成」折叠分组 |
 
-### 5.7 日历
+### 5.7 循环打卡
 
 | 函数 | 行为 |
 | --- | --- |
-| `calDayAria(key, todos, min)` | 生成日期格的无障碍描述（未完成数、最紧急档、学习分钟） |
+| `checkinCycle(item)` | 按 `daily` / `weekly` / `interval` 算出本周期是否完成、是否到期与状态文案 |
+| `checkinCanRun(item, cycle)` | 视频项当天可重复记录；自定义项每周期只允许一次 |
+| `renderCheckins()` | 渲染列表：名称、周期/类型/绑定课程/累计次数、状态与打卡按钮 |
+| `openCheckinEditor(id)` / `saveCheckinFromEditor()` | 新建或编辑循环项（名称、类型、周期、间隔天数、可选绑定课程） |
+| `openCheckinSheet(id)` | 打开打卡弹窗；视频项自动带出未看完的第一节与默认进度 |
+| `updateCheckinProgress()` | 显示所选课时「当前已看 / 总时长 / 百分比」，并预填 +15 分钟的目标值 |
+| `runCheckin()` | 视频项写回 `watchedMin` 并调用 `adjustActivity` / `recordDetail`，再记一条 `logs`；自定义项只记 `logs` |
+| `deleteCheckin(id)` | 二次确认后删除循环项及其历史 `logs` |
+
+周期判定：`weekly` 以周一为起点；`interval` 用最后一次打卡日期 + `intervalDays` 推算下次到期日，未到期时按钮禁用并显示「下次 MM-DD」。删除课程时会清空循环项里指向它的 `courseId`，界面回退为「原绑定课程已删除」，打卡时改为每次任选课程。
+
+### 5.8 日历
+
+| 函数 | 行为 |
+| --- | --- |
+| `calDayAria(key, todos, min)` | 生成日期格的无障碍描述（未完成数、最紧急档、视频时长、完成待办与打卡次数） |
 | `renderCalendar()` | 月标题、本月逾期 / 本周截止、桌面网格、手机列表 |
 | `shiftMonth(delta)` | 切换月份并重渲染 |
 
-日期格颜色只取当天**最紧急**的一项待办决定（`URGENCY_RANK` 最小者）；格内同时显示当天学习分钟（`min′`）。
+日期格颜色只取当天**最紧急**的一项待办决定（`URGENCY_RANK` 最小者）；格内同时显示当天视频时长（`min′`）与量化细字 `dayStats(key)`（`✓完成待办 · 卡打卡次数`）。
 
-### 5.8 视图切换
+### 5.9 视图切换
 
 `setView(name)`：
 
@@ -198,7 +214,7 @@
 
 `bindTabKeys()`：在 `#viewTabs` 上监听 `ArrowLeft / ArrowRight / Home / End`，切换并聚焦对应页签。
 
-### 5.9 课程与课时操作
+### 5.10 课程与课时操作
 
 | 函数 | 行为 |
 | --- | --- |
@@ -216,7 +232,7 @@
 | `openLessonTitleEditor(btn)` | 标题按钮原地切换为输入框 |
 | `commitLessonTitle(courseId, lessonId, raw)` | 保存或清空标题（清空后回退为「第 N 节」） |
 
-### 5.10 待办编辑与批量导入
+### 5.11 待办编辑与批量导入
 
 | 函数 | 行为 |
 | --- | --- |
@@ -235,7 +251,7 @@
 
 `TODO_IMPORT_CAT_MAP` 同时接受内部 key 与中文标签（学业 / 竞赛 / 赛事 / 其他），避免 AI 输出中文类别时被误判非法。
 
-### 5.11 示例、头部与提示
+### 5.12 示例、头部与提示
 
 | 函数 | 行为 |
 | --- | --- |
@@ -245,7 +261,7 @@
 | `renderHeatNote()` | 有打卡但已无课程时，提示「记录已失去来源」并提供重置入口 |
 | `toast(msg)` | 2.4 秒轻提示，重复调用会重置计时 |
 
-### 5.12 B 站导入
+### 5.13 B 站导入
 
 | 函数 | 行为 |
 | --- | --- |
@@ -263,7 +279,7 @@
 | `copyText(text)` | 优先 `navigator.clipboard`，失败降级 `fallbackCopy` |
 | `fallbackCopy(text)` | 隐藏 textarea + `execCommand("copy")`，兼容 `file://` |
 
-### 5.13 云同步
+### 5.14 云同步
 
 云同步函数数量较多，单独成篇：[05 云同步](05-cloud-sync.md)。此处只列入口：
 
@@ -273,7 +289,7 @@
 - 拉取：`manualPull` `syncAfterLogin` `runAutoPull`
 - 冲突：`showConflict` `applyRemote` `adoptRemote`
 
-### 5.14 导入导出（事件内联）
+### 5.15 导入导出（事件内联）
 
 导出：无数据时拒绝；否则拼装完整快照 + `exportedAt`，`Blob` + `URL.createObjectURL` + 临时 `<a download>` 触发下载，最后 `revokeObjectURL`。
 
@@ -330,6 +346,14 @@ const viewScroll = { study: 0, todo: 0, calendar: 0 };
 | `#todoList` | `change` | 勾选完成 / 取消完成，写 `doneAt` |
 | `#todoList` | `click` | 编辑 / 删除 |
 | `#todoForm` | `submit` | 新增或更新待办；校验标题、时间、链接 |
+| `#checkinNewBtn` `#checkinEditorClose` 背景 | `click` | 打开 / 关闭循环打卡设置 |
+| `#checkinKind` `#checkinCadence` | `change` | 按类型 / 周期显隐「关联课程」「间隔天数」 |
+| `#checkinForm` | `submit` | 新建或更新循环项 |
+| `#checkinList` | `click` | 打卡 / 编辑 / 删除（`data-checkin-run|edit|del`） |
+| `#checkinSheetClose` 背景 `[data-checkin-sheet-close]` | `click` | 关闭打卡弹窗 |
+| `#checkinSheetCourse` | `change` | 重填课时下拉并更新进度提示 |
+| `#checkinSheetLesson` | `change` | 刷新「当前已看 / 总时长 / 百分比」与默认进度 |
+| `#checkinRunForm` | `submit` | 执行打卡：视频写课时进度与视频时长，自定义只记一次 |
 | `#calPrev` `#calNext` `#calToday` | `click` | 月份切换 / 回到本月 |
 | `#courseList` | `click` | 展开收起、删除课程、添加一节、改标题、课时操作 |
 | `#courseList` | `change` | 课时标题 / 时长输入提交 |

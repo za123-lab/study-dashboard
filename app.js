@@ -8,7 +8,7 @@
   "use strict";
 
   const APP_NAME = "学业工作台"; // 站点名称唯一出处：标题、页脚与导出文件名都引用它
-  const SCHEMA_VERSION = 3; // 数据结构版本：高于本版本的快照不自动上传，避免旧页面覆盖新字段
+  const SCHEMA_VERSION = 4; // 数据结构版本：高于本版本的快照不自动上传，避免旧页面覆盖新字段
   const STORE_KEY = "study-log-v1"; // 沿用旧 key，老数据读取后自动迁移
   const SUPA_CFG_KEY = "study-supabase-v1"; // Supabase 连接配置，不随导出的进度文件走
   const SUPA_SESSION_KEY = "study-supabase-session-v1"; // 登录态（access/refresh token）
@@ -39,6 +39,7 @@
   let migratedOnLoad = false;
   let toastTimer = null;
   let pendingImport = null; // 已解析、待确认写入的 B 站课程
+  let activeCheckinId = null; // 当前正在打卡的循环项 id
 
   // 云同步运行状态（Supabase 配置、登录态、云端版本号都存 localStorage）
   let supaCfg = null; // { url, anonKey, auto }
@@ -238,6 +239,7 @@
       details: {},
       demoDetails: {},
       todos: [],
+      checkins: [],
       courseOpen: {},
       panelOpen: { sync: false, bili: false },
     };
@@ -398,7 +400,19 @@
       let dueTime = typeof item.dueTime === "string" ? item.dueTime.trim() : "";
       if (!/^([01]?\d|2[0-4]):[0-5]\d$/.test(dueTime)) dueTime = "";
       const done = item.done === true;
-      const doneAt = done ? Math.min(clampInt(item.doneAt, 0, 4102444800000, 0), 4102444800000) : 0;
+      // 完成时间兼容数字时间戳与 ISO 字符串（外部导入的 JSON 常见后者），无法识别时置 0
+      let doneAt = 0;
+      if (done) {
+        const rawAt =
+          typeof item.doneAt === "number"
+            ? item.doneAt
+            : typeof item.doneAt === "string"
+            ? Date.parse(item.doneAt)
+            : NaN;
+        if (Number.isFinite(rawAt)) {
+          doneAt = clampInt(Math.round(rawAt), 0, 4102444800000, 0);
+        }
+      }
       const note = typeof item.note === "string" ? item.note.trim().slice(0, 500) : "";
       let link = "";
       if (typeof item.link === "string" && /^https?:\/\//i.test(item.link.trim())) {
@@ -421,6 +435,65 @@
       };
       if (dueNote) todo.dueNote = dueNote;
       out.push(todo);
+    });
+    return out;
+  }
+
+  /** 循环打卡整理：名称必填，类型/周期非法时兜底；日志按时间排序并限制条数 */
+  function cleanCheckins(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seenIds = {};
+    raw.forEach(function (item) {
+      if (!item || typeof item !== "object") return;
+      const name =
+        typeof item.name === "string" ? item.name.trim().slice(0, 40) : "";
+      if (!name) return;
+      let id =
+        typeof item.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(item.id)
+          ? item.id
+          : makeId();
+      if (seenIds[id]) id = makeId();
+      seenIds[id] = true;
+
+      const kind = item.kind === "video" ? "video" : "custom";
+      const cadence =
+        item.cadence === "weekly" || item.cadence === "interval"
+          ? item.cadence
+          : "daily";
+      const intervalDays = clampInt(item.intervalDays, 2, 30, 3);
+      const courseId =
+        typeof item.courseId === "string" ? item.courseId.trim().slice(0, 80) : "";
+
+      const logs = [];
+      (Array.isArray(item.logs) ? item.logs : []).forEach(function (log) {
+        if (!log || typeof log !== "object") return;
+        if (typeof log.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(log.date)) return;
+        const at = clampInt(log.at, 0, 4102444800000, 0);
+        const min = clampInt(log.min, 0, 9999, 0);
+        const entry = { date: log.date, at: at };
+        if (min > 0) entry.min = min;
+        if (typeof log.cid === "string" && log.cid) entry.cid = log.cid.slice(0, 80);
+        if (typeof log.lid === "string" && log.lid) entry.lid = log.lid.slice(0, 80);
+        const note = typeof log.note === "string" ? log.note.trim().slice(0, 200) : "";
+        if (note) entry.note = note;
+        logs.push(entry);
+      });
+      logs.sort(function (a, b) {
+        return (a.at || 0) - (b.at || 0);
+      });
+      // 只保留最近 1000 条，避免历史日志无限增长拖慢同步
+      if (logs.length > 1000) logs.splice(0, logs.length - 1000);
+
+      out.push({
+        id: id,
+        name: name,
+        kind: kind,
+        cadence: cadence,
+        intervalDays: intervalDays,
+        courseId: courseId,
+        logs: logs,
+      });
     });
     return out;
   }
@@ -469,6 +542,12 @@
     if (rawPanelOpen.sync === true) panelOpen.sync = true;
     if (rawPanelOpen.bili === true) panelOpen.bili = true;
 
+    // 循环打卡：绑定的课程可能已被删除，清掉悬空引用，界面会改为「每次任选课程」
+    const checkins = cleanCheckins(data.checkins);
+    checkins.forEach(function (item) {
+      if (item.courseId && !courseIds.has(item.courseId)) item.courseId = "";
+    });
+
     const rawActivity =
       data.activity && typeof data.activity === "object" ? data.activity : {};
     const activity = {};
@@ -502,6 +581,7 @@
       details: cleanDetails(data.details),
       demoDetails: cleanDetails(data.demoDetails),
       todos: cleanTodos(data.todos),
+      checkins: checkins,
       courseOpen: courseOpen,
       panelOpen: panelOpen,
     };
@@ -517,6 +597,8 @@
     appTitle: $("#appTitle"),
     appFoot: $("#appFoot"),
     todayMin: $("#todayMin"),
+    todayDoneTodos: $("#todayDoneTodos"),
+    todayCheckins: $("#todayCheckins"),
     todayList: $("#todayList"),
     todayEmpty: $("#todayEmpty"),
     todayNext: $("#todayNext"),
@@ -602,6 +684,7 @@
     dayDetail: $("#dayDetail"),
     dayTitle: $("#dayTitle"),
     dayTotal: $("#dayTotal"),
+    dayMetrics: $("#dayMetrics"),
     dayDemo: $("#dayDemo"),
     dayBody: $("#dayBody"),
     dayClose: $("#dayClose"),
@@ -646,6 +729,36 @@
     todoLink: $("#todoLink"),
     todoEditorTitle: $("#todoEditorTitle"),
     todoEditorClose: $("#todoEditorClose"),
+    checkinNewBtn: $("#checkinNewBtn"),
+    checkinList: $("#checkinList"),
+    checkinEmpty: $("#checkinEmpty"),
+    checkinEditor: $("#checkinEditor"),
+    checkinForm: $("#checkinForm"),
+    checkinId: $("#checkinId"),
+    checkinName: $("#checkinName"),
+    checkinKind: $("#checkinKind"),
+    checkinCadence: $("#checkinCadence"),
+    checkinIntervalField: $("#checkinIntervalField"),
+    checkinIntervalDays: $("#checkinIntervalDays"),
+    checkinCourseField: $("#checkinCourseField"),
+    checkinCourse: $("#checkinCourse"),
+    checkinFormNote: $("#checkinFormNote"),
+    checkinEditorTitle: $("#checkinEditorTitle"),
+    checkinEditorClose: $("#checkinEditorClose"),
+    checkinSheet: $("#checkinSheet"),
+    checkinSheetTitle: $("#checkinSheetTitle"),
+    checkinSheetMeta: $("#checkinSheetMeta"),
+    checkinRunForm: $("#checkinRunForm"),
+    checkinVideoFields: $("#checkinVideoFields"),
+    checkinCustomFields: $("#checkinCustomFields"),
+    checkinSheetCourseField: $("#checkinSheetCourseField"),
+    checkinSheetCourse: $("#checkinSheetCourse"),
+    checkinSheetLesson: $("#checkinSheetLesson"),
+    checkinProgressInfo: $("#checkinProgressInfo"),
+    checkinSheetProgress: $("#checkinSheetProgress"),
+    checkinSheetNote: $("#checkinSheetNote"),
+    checkinRunBtn: $("#checkinRunBtn"),
+    checkinSheetClose: $("#checkinSheetClose"),
     calPrev: $("#calPrev"),
     calNext: $("#calNext"),
     calToday: $("#calToday"),
@@ -673,6 +786,7 @@
     viewDirty[name] = false;
     if (name === "study") {
       renderToday();
+      renderCheckins();
       renderStats();
       renderCourses();
       renderHeatmap();
@@ -756,11 +870,28 @@
     );
   }
 
-  /** 首屏「今天要做什么」：今日学习分钟 + 今日待办 + 最近截止 */
+  /** 首屏「今天要做什么」：今日视频时长 + 完成待办 + 打卡次数 */
   function renderToday() {
     const key = todayKey();
     const min = state.activity[key] || 0;
     el.todayMin.textContent = min;
+
+    // 今日量化：完成的待办条数 + 循环打卡次数（视频项一次算一条）
+    const doneTodayCount = (state.todos || []).filter(function (t) {
+      return t.done && t.doneAt && dateKey(new Date(t.doneAt)) === key;
+    }).length;
+    const checkinCount = (state.checkins || []).reduce(function (sum, item) {
+      return (
+        sum +
+        (item.logs || []).filter(function (log) {
+          return log.date === key;
+        }).length
+      );
+    }, 0);
+    el.todayDoneTodos.textContent = doneTodayCount;
+    el.todayCheckins.textContent = checkinCount;
+    el.todayDoneTodos.setAttribute("aria-label", "今天完成待办 " + doneTodayCount + " 条");
+    el.todayCheckins.setAttribute("aria-label", "今天打卡 " + checkinCount + " 次");
 
     const allToday = todosOnDay(key);
     const pendingToday = allToday.filter(function (t) {
@@ -1032,6 +1163,21 @@
     );
   }
 
+  /** 某天除视频时长外的量化数据：完成待办条数、打卡次数 */
+  function dayStats(key) {
+    let done = 0;
+    (state.todos || []).forEach(function (t) {
+      if (t.done && t.doneAt && dateKey(new Date(t.doneAt)) === key) done++;
+    });
+    let checkins = 0;
+    (state.checkins || []).forEach(function (item) {
+      (item.logs || []).forEach(function (log) {
+        if (log.date === key) checkins++;
+      });
+    });
+    return { done: done, checkins: checkins };
+  }
+
   function renderHeatmap() {
     const today = new Date();
     const weeks = heatWeeks();
@@ -1045,7 +1191,12 @@
       const min = state.activity[key] || 0;
       const isFuture = key > todayKey();
       const hasDetail = hasDayDetails(key);
-      const canOpen = !isFuture && (min > 0 || hasDetail);
+      const stats = dayStats(key);
+      const hasStats = stats.done > 0 || stats.checkins > 0;
+      // 有视频时用右下圆点表示还有待办/打卡，圆点颜色按「完成条数」由浅到深分三档
+      const statCount = stats.done + stats.checkins;
+      const statLevel = statCount > 2 ? 3 : statCount;
+      const canOpen = !isFuture && (min > 0 || hasDetail || hasStats);
       const readable =
         key +
         " " +
@@ -1053,15 +1204,20 @@
         (isFuture
           ? " · 还没到"
           : min
-          ? " · 看了 " + min + " 分钟"
-          : " · 还没有学习记录");
-      // 有打卡的日期可以点开当日详情；空白日期只给一句轻提示
+          ? " · 视频 " + min + " 分钟"
+          : " · 没有视频记录") +
+        (hasStats
+          ? " · 完成待办 " + stats.done + " 项 · 打卡 " + stats.checkins + " 次"
+          : "");
+      // 有视频、打卡或完成待办的日期都可以点开当日详情；空白日期只给一句轻提示
       html +=
         '<button type="button" class="cell l' +
         minuteLevel(min) +
         (isFuture ? " future" : "") +
         (min ? " has-data" : "") +
         (hasDetail ? " has-detail" : "") +
+        (hasStats ? " has-stats" : "") +
+        (min && hasStats ? " d" + statLevel : "") +
         '" data-date="' +
         key +
         '" tabindex="' +
@@ -1069,7 +1225,7 @@
         '" aria-disabled="' +
         (isFuture ? "true" : "false") +
         '" aria-label="' +
-        escapeHtml(readable + (hasDetail ? "，查看当天明细" : "")) +
+        escapeHtml(readable + (canOpen ? "，查看当天明细" : "")) +
         '" title="' +
         escapeHtml(readable) +
         '"></button>';
@@ -1184,13 +1340,23 @@
       });
 
     const dayTodos = todosOnDay(key);
+    const stats = dayStats(key);
+    const checkinLogs = [];
+    (state.checkins || []).forEach(function (item) {
+      (item.logs || []).forEach(function (log) {
+        if (log.date === key) checkinLogs.push({ item: item, log: log });
+      });
+    });
+    checkinLogs.sort(function (a, b) {
+      return (a.log.at || 0) - (b.log.at || 0);
+    });
 
     el.dayTitle.textContent = dayLabel(key);
-    if (min) {
-      el.dayTotal.textContent = "当天累计看了 " + min + " 分钟（" + fmtDur(min) + "）";
-    } else {
-      el.dayTotal.textContent = "这天没有学习记录";
-    }
+    el.dayTotal.textContent = min
+      ? "视频时长 " + min + " 分钟（" + fmtDur(min) + "）"
+      : "这天没有视频记录";
+    el.dayMetrics.textContent =
+      "完成待办 " + stats.done + " 项 · 打卡 " + stats.checkins + " 次";
 
     const parts = [];
 
@@ -1229,8 +1395,8 @@
         parts.push(
           '<p class="state-box is-compact" data-kind="empty">这天没有明细——明细从本次更新后开始记录，之前只存了当天总分钟。</p>'
         );
-      } else if (dayTodos.length) {
-        parts.push('<p class="state-box is-compact" data-kind="empty">这天没有学习记录。</p>');
+      } else if (dayTodos.length || checkinLogs.length || stats.done) {
+        parts.push('<p class="state-box is-compact" data-kind="empty">这天没有视频明细。</p>');
       }
     }
 
@@ -1271,9 +1437,35 @@
       parts.push('<p class="state-box is-compact" data-kind="empty">这天没有待办安排。</p>');
     }
 
-    if (!items.length && !min && !dayTodos.length) {
+    if (checkinLogs.length) {
+      parts.push(
+        '<h4 class="day-h">当天打卡 · ' + checkinLogs.length + " 次</h4>",
+        '<ul class="day-list">' +
+          checkinLogs
+            .map(function (rec) {
+              const sub = [];
+              if (rec.log.min) sub.push("+" + rec.log.min + " 分钟视频");
+              if (rec.log.note) sub.push(rec.log.note);
+              if (!sub.length) sub.push("已完成");
+              return (
+                '<li class="day-item">' +
+                '<div class="di-top"><span class="di-name">' +
+                escapeHtml(rec.item.name) +
+                '</span><span class="di-add mono">' +
+                escapeHtml(sub[0]) +
+                "</span></div>" +
+                (sub.length > 1 ? '<div class="di-meta">' + escapeHtml(sub.slice(1).join(" · ")) + "</div>" : "") +
+                "</li>"
+              );
+            })
+            .join("") +
+          "</ul>"
+      );
+    }
+
+    if (!items.length && !min && !dayTodos.length && !checkinLogs.length && !stats.done) {
       el.dayBody.innerHTML =
-        '<p class="state-box is-compact" data-kind="empty">这天没有安排，也没有学习记录。</p>';
+        '<p class="state-box is-compact" data-kind="empty">这天没有安排，也没有记录。</p>';
     } else {
       el.dayBody.innerHTML = parts.join("");
     }
@@ -1557,7 +1749,9 @@
     } else {
       bits.push("没有待办");
     }
-    bits.push(min ? "学习 " + min + " 分钟" : "没有学习记录");
+    bits.push(min ? "视频 " + min + " 分钟" : "没有视频记录");
+    const stats = dayStats(key);
+    bits.push("完成待办 " + stats.done + " 项，打卡 " + stats.checkins + " 次");
     return bits.join("，");
   }
 
@@ -1615,6 +1809,11 @@
         return !t.done;
       }).length;
       const dots = top ? '<i class="dot" data-u="' + top + '"></i>' : "";
+      const stats = dayStats(key);
+      const statText =
+        (stats.done ? "✓" + stats.done : "") +
+        (stats.done && stats.checkins ? " · " : "") +
+        (stats.checkins ? "卡" + stats.checkins : "");
 
       grid +=
         '<button type="button" class="cal-cell' +
@@ -1633,6 +1832,7 @@
         dots +
         "</span>" +
         (min ? '<span class="cal-min mono">' + min + "′</span>" : "") +
+        (statText ? '<span class="cal-stats mono">' + statText + "</span>" : "") +
         "</button>";
 
       // 手机列表视图：每天一行，左侧按最紧急一档着色，类别信息留到弹层里
@@ -1664,6 +1864,7 @@
         "</span>" +
         '<span class="cal-row-min mono">' +
         (min ? min + "′" : "—") +
+        (statText ? "<i>" + statText + "</i>" : "") +
         "</span></button>";
     }
     const tail = (startPad + days) % 7;
@@ -1781,6 +1982,491 @@
     saveState();
     renderAll();
     if (message) toast(message);
+  }
+
+  // ---------- 循环打卡 ----------
+
+  function checkinById(id) {
+    return (
+      (state.checkins || []).find(function (item) {
+        return item.id === id;
+      }) || null
+    );
+  }
+
+  function checkinKeyToDate(key) {
+    const parts = String(key).split("-");
+    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  }
+
+  function checkinWeekStartKey() {
+    const now = new Date();
+    const offset = (now.getDay() + 6) % 7; // 周一算一周的第一天
+    return dateKey(addDays(now, -offset));
+  }
+
+  function checkinLastLog(item) {
+    let last = null;
+    (item.logs || []).forEach(function (log) {
+      if (
+        !last ||
+        log.date > last.date ||
+        (log.date === last.date && (log.at || 0) >= (last.at || 0))
+      ) {
+        last = log;
+      }
+    });
+    return last;
+  }
+
+  /** 当前周期的状态：是否已完成 / 是否到了可打卡的日期 */
+  function checkinCycle(item) {
+    const today = todayKey();
+    const logs = item.logs || [];
+
+    if (item.cadence === "weekly") {
+      const start = checkinWeekStartKey();
+      const done = logs.some(function (log) {
+        return log.date >= start && log.date <= today;
+      });
+      return {
+        done: done,
+        due: !done,
+        status: done ? "本周已打卡" : "本周待打卡",
+      };
+    }
+
+    if (item.cadence === "interval") {
+      const last = checkinLastLog(item);
+      if (!last) return { done: false, due: true, status: "待首次打卡" };
+      const next = dateKey(addDays(checkinKeyToDate(last.date), item.intervalDays));
+      if (today < next) {
+        return { done: false, due: false, status: "下次 " + next.slice(5) };
+      }
+      return {
+        done: false,
+        due: true,
+        status: today === next ? "今天到期" : "已到期 · 今天补上",
+      };
+    }
+
+    const done = logs.some(function (log) {
+      return log.date === today;
+    });
+    return {
+      done: done,
+      due: !done,
+      status: done ? "今天已打卡" : "今天待打卡",
+    };
+  }
+
+  /** 视频项当天可以反复记录不同课时；自定义项每个周期只记一次 */
+  function checkinCanRun(item, cycle) {
+    if (item.cadence === "interval" && !cycle.due) return false;
+    if (item.kind === "custom" && cycle.done) return false;
+    return true;
+  }
+
+  function checkinCadenceText(item) {
+    if (item.cadence === "weekly") return "每周";
+    if (item.cadence === "interval") return "每 " + item.intervalDays + " 天";
+    return "每天";
+  }
+
+  function checkinCourseOptionsHtml(includeAny) {
+    const parts = [];
+    if (includeAny) parts.push('<option value="">不绑定（每次任选课程）</option>');
+    state.courses.forEach(function (course) {
+      parts.push(
+        '<option value="' +
+          escapeHtml(course.id) +
+          '">' +
+          escapeHtml(course.name) +
+          (course.demo ? "（示例）" : "") +
+          "</option>"
+      );
+    });
+    return parts.join("");
+  }
+
+  function renderCheckins() {
+    const list = state.checkins || [];
+    el.checkinList.innerHTML = list
+      .map(function (item) {
+        const cycle = checkinCycle(item);
+        const last = checkinLastLog(item);
+        const doneToday = !!(last && last.date === todayKey());
+        const isDone = cycle.done || doneToday;
+        const canRun = checkinCanRun(item, cycle);
+        const count = item.logs ? item.logs.length : 0;
+        const course =
+          item.kind === "video" && item.courseId ? findCourse(item.courseId) : null;
+
+        const metaParts = [
+          checkinCadenceText(item),
+          item.kind === "video" ? "视频" : "自定义",
+        ];
+        if (item.kind === "video") {
+          metaParts.push(
+            course
+              ? "绑定《" + course.name + "》"
+              : item.courseId
+              ? "原绑定课程已删除"
+              : "每次任选课程"
+          );
+        }
+        metaParts.push("累计 " + count + " 次");
+
+        const statusText =
+          item.cadence === "interval" && doneToday
+            ? "今天已打卡 · " + cycle.status
+            : cycle.status;
+
+        let runLabel = "打卡";
+        if (!canRun) {
+          runLabel = item.cadence === "interval" && !cycle.due ? cycle.status : "已打卡";
+        } else if (item.kind === "video" && cycle.done) {
+          runLabel = "再记一节";
+        }
+
+        return (
+          '<li class="checkin-item' +
+          (isDone ? " is-done" : "") +
+          '" data-checkin-id="' +
+          escapeHtml(item.id) +
+          '">' +
+          '<div class="checkin-main">' +
+          '<div class="checkin-title-row">' +
+          '<span class="checkin-mark" aria-hidden="true">' +
+          (isDone ? "✓" : "○") +
+          "</span>" +
+          '<h3 class="checkin-name">' +
+          escapeHtml(item.name) +
+          "</h3>" +
+          "</div>" +
+          '<p class="checkin-meta mono">' +
+          escapeHtml(metaParts.join(" · ")) +
+          "</p>" +
+          '<p class="checkin-status' +
+          (isDone ? " is-done" : "") +
+          '">' +
+          escapeHtml(statusText) +
+          "</p>" +
+          "</div>" +
+          '<div class="checkin-actions">' +
+          '<button type="button" class="btn primary checkin-go" data-checkin-run="' +
+          escapeHtml(item.id) +
+          '"' +
+          (canRun ? "" : " disabled") +
+          ">" +
+          runLabel +
+          "</button>" +
+          '<button type="button" class="mini-btn" data-checkin-edit="' +
+          escapeHtml(item.id) +
+          '">编辑</button>' +
+          '<button type="button" class="mini-btn danger" data-checkin-del="' +
+          escapeHtml(item.id) +
+          '">删除</button>' +
+          "</div>" +
+          "</li>"
+        );
+      })
+      .join("");
+    el.checkinEmpty.hidden = list.length > 0;
+  }
+
+  function syncCheckinEditorFields() {
+    const kind = el.checkinKind.value === "video" ? "video" : "custom";
+    el.checkinCourseField.hidden = kind !== "video";
+    el.checkinIntervalField.hidden = el.checkinCadence.value !== "interval";
+    el.checkinFormNote.textContent =
+      kind === "video"
+        ? "视频打卡：打开课时列表选择本次看到的进度，新增的分钟会写进课时进度和今天的学习记录。"
+        : "自定义打卡：只记录完成次数与一句备注，不计入视频时长。";
+  }
+
+  function openCheckinEditor(id) {
+    const item = id ? checkinById(id) : null;
+    el.checkinEditorTitle.textContent = item ? "编辑循环打卡" : "新建循环打卡";
+    el.checkinId.value = item ? item.id : "";
+    el.checkinName.value = item ? item.name : "";
+    el.checkinKind.value = item ? item.kind : "video";
+    el.checkinCadence.value = item ? item.cadence : "daily";
+    el.checkinIntervalDays.value = item ? item.intervalDays : 3;
+    el.checkinCourse.innerHTML = checkinCourseOptionsHtml(true);
+    el.checkinCourse.value = item && item.courseId ? item.courseId : "";
+    syncCheckinEditorFields();
+    el.checkinEditor.hidden = false;
+    el.checkinName.focus();
+  }
+
+  function closeCheckinEditor() {
+    el.checkinEditor.hidden = true;
+    el.checkinForm.reset();
+    el.checkinId.value = "";
+  }
+
+  function saveCheckinFromEditor() {
+    const name = el.checkinName.value.trim().slice(0, 40);
+    if (!name) {
+      toast("给这个循环打卡起个名字");
+      el.checkinName.focus();
+      return;
+    }
+    const kind = el.checkinKind.value === "video" ? "video" : "custom";
+    const cadence =
+      el.checkinCadence.value === "weekly" || el.checkinCadence.value === "interval"
+        ? el.checkinCadence.value
+        : "daily";
+    const intervalDays = clampInt(el.checkinIntervalDays.value, 2, 30, 3);
+    let courseId = kind === "video" ? el.checkinCourse.value : "";
+    if (courseId && !findCourse(courseId)) courseId = "";
+
+    const id = el.checkinId.value;
+    const existing = id ? checkinById(id) : null;
+    if (existing) {
+      existing.name = name;
+      existing.kind = kind;
+      existing.cadence = cadence;
+      existing.intervalDays = intervalDays;
+      existing.courseId = courseId;
+    } else {
+      state.checkins.push({
+        id: makeId(),
+        name: name,
+        kind: kind,
+        cadence: cadence,
+        intervalDays: intervalDays,
+        courseId: courseId,
+        logs: [],
+      });
+    }
+    saveState();
+    renderAll();
+    closeCheckinEditor();
+    toast(existing ? "循环打卡已保存" : "已新建循环打卡「" + name + "」");
+  }
+
+  function addCheckinLog(item, extra) {
+    if (!item.logs) item.logs = [];
+    const log = { date: todayKey(), at: Date.now() };
+    if (extra && extra.min > 0) log.min = extra.min;
+    if (extra && extra.cid) log.cid = extra.cid;
+    if (extra && extra.lid) log.lid = extra.lid;
+    if (extra && extra.note) log.note = extra.note;
+    item.logs.push(log);
+    if (item.logs.length > 1000) item.logs.splice(0, item.logs.length - 1000);
+  }
+
+  function deleteCheckin(id) {
+    const item = checkinById(id);
+    if (!item) return;
+    if (
+      !confirm(
+        "删除循环打卡「" + item.name + "」？它的历史打卡记录会一起删除，不影响课程进度与视频时长。"
+      )
+    ) {
+      return;
+    }
+    state.checkins = state.checkins.filter(function (entry) {
+      return entry.id !== id;
+    });
+    saveState();
+    renderAll();
+    toast("已删除「" + item.name + "」");
+  }
+
+  function checkinSheetCourse() {
+    const id = el.checkinSheetCourse.value;
+    return id ? findCourse(id) : null;
+  }
+
+  function refreshCheckinLessons() {
+    const course = checkinSheetCourse();
+    if (!course) {
+      el.checkinSheetLesson.innerHTML = "";
+      el.checkinProgressInfo.textContent = state.courses.length
+        ? "先选择一门课程"
+        : "还没有课程，先去学习视图登记课程和课时";
+      el.checkinRunBtn.disabled = true;
+      return;
+    }
+    const lessons = course.lessons;
+    el.checkinSheetLesson.innerHTML = lessons
+      .map(function (lesson, idx) {
+        return (
+          '<option value="' +
+          escapeHtml(lesson.id) +
+          '">' +
+          escapeHtml("第 " + (idx + 1) + " 节 · " + lessonLabel(lesson, idx + 1)) +
+          "</option>"
+        );
+      })
+      .join("");
+    if (!lessons.length) {
+      el.checkinProgressInfo.textContent = "这门课还没有课时，先在课程列表里添加一节";
+      el.checkinRunBtn.disabled = true;
+      return;
+    }
+    // 默认选中第一节还没看完的；全看完则落在最后一节
+    let pick = lessons.length - 1;
+    for (let i = 0; i < lessons.length; i++) {
+      const lesson = lessons[i];
+      const unfinished =
+        lesson.totalMin > 0 ? lesson.watchedMin < lesson.totalMin : lesson.watchedMin === 0;
+      if (unfinished) {
+        pick = i;
+        break;
+      }
+    }
+    el.checkinSheetLesson.value = lessons[pick].id;
+    el.checkinRunBtn.disabled = false;
+    updateCheckinProgress();
+  }
+
+  function updateCheckinProgress() {
+    const course = checkinSheetCourse();
+    const lesson = course ? findLesson(course, el.checkinSheetLesson.value) : null;
+    if (!lesson) {
+      el.checkinProgressInfo.textContent = "";
+      return;
+    }
+    const total = lesson.totalMin || 0;
+    const before = lesson.watchedMin || 0;
+    const pct = lessonPct(lesson);
+    el.checkinProgressInfo.innerHTML =
+      '当前已看 <b class="mono">' +
+      fmtDur(before) +
+      "</b>" +
+      (total
+        ? ' / <b class="mono">' +
+          fmtDur(total) +
+          '</b> · <b class="mono">' +
+          (pct === null ? "—" : pct + "%") +
+          "</b>"
+        : "（这一节还没填总时长）");
+
+    if (total > 0 && before >= total) {
+      el.checkinSheetProgress.value = "";
+      el.checkinSheetProgress.placeholder = "这一节已看完，换一节或直接填新的进度";
+    } else {
+      const next = total > 0 ? Math.min(total, before + 15) : before + 15;
+      el.checkinSheetProgress.value = fmtDur(next);
+      el.checkinSheetProgress.placeholder = "例如 " + fmtDur(next);
+    }
+  }
+
+  function openCheckinSheet(id) {
+    const item = checkinById(id);
+    if (!item) return;
+    activeCheckinId = id;
+
+    const cycle = checkinCycle(item);
+    if (!checkinCanRun(item, cycle)) {
+      toast(item.kind === "custom" ? "这个周期已经打过卡了" : "还没到下一次打卡时间");
+      return;
+    }
+
+    el.checkinSheetTitle.textContent = item.name;
+    const metaParts = [
+      checkinCadenceText(item),
+      item.kind === "video" ? "视频打卡" : "自定义打卡",
+      cycle.status,
+      "累计 " + (item.logs ? item.logs.length : 0) + " 次",
+    ];
+    if (item.kind === "video") metaParts.push("打卡后同步更新课时进度与今天的视频时长");
+    el.checkinSheetMeta.textContent = metaParts.join(" · ");
+
+    el.checkinVideoFields.hidden = item.kind !== "video";
+    el.checkinCustomFields.hidden = item.kind !== "custom";
+    el.checkinSheetNote.value = "";
+
+    if (item.kind === "video") {
+      const bound = item.courseId ? findCourse(item.courseId) : null;
+      if (bound) {
+        el.checkinSheetCourse.innerHTML =
+          '<option value="' +
+          escapeHtml(bound.id) +
+          '">' +
+          escapeHtml(bound.name) +
+          "</option>";
+        el.checkinSheetCourse.value = bound.id;
+        el.checkinSheetCourseField.hidden = true;
+      } else {
+        el.checkinSheetCourseField.hidden = false;
+        el.checkinSheetCourse.innerHTML = checkinCourseOptionsHtml(false);
+        el.checkinSheetCourse.value = state.courses.length ? state.courses[0].id : "";
+      }
+      refreshCheckinLessons();
+    }
+
+    el.checkinSheet.hidden = false;
+    (item.kind === "video" ? el.checkinSheetProgress : el.checkinSheetNote).focus();
+  }
+
+  function closeCheckinSheet() {
+    el.checkinSheet.hidden = true;
+    el.checkinRunForm.reset();
+    activeCheckinId = null;
+  }
+
+  function runCheckin() {
+    const item = checkinById(activeCheckinId);
+    if (!item) return;
+    const cycle = checkinCycle(item);
+    if (!checkinCanRun(item, cycle)) {
+      closeCheckinSheet();
+      toast("这个周期已经打过卡了");
+      return;
+    }
+
+    if (item.kind === "video") {
+      const course = checkinSheetCourse();
+      const lesson = course ? findLesson(course, el.checkinSheetLesson.value) : null;
+      if (!course || !lesson) {
+        toast("先选择课程和课时");
+        return;
+      }
+      const before = lesson.watchedMin || 0;
+      const total = lesson.totalMin || 0;
+      const parsed = parseDuration(el.checkinSheetProgress.value);
+      if (parsed === null) {
+        toast("进度格式看不懂，可以填 43 或 1:23");
+        el.checkinSheetProgress.focus();
+        return;
+      }
+      let target = Math.round(parsed);
+      if (total > 0) target = Math.min(target, total);
+      target = Math.min(9999, target);
+      if (target <= before) {
+        toast("这次填的进度没有超过当前已看 " + fmtDur(before));
+        el.checkinSheetProgress.focus();
+        return;
+      }
+      const delta = target - before;
+      lesson.watchedMin = target;
+      adjustActivity(delta);
+      recordDetail(course, lesson, delta);
+      addCheckinLog(item, { min: delta, cid: course.id, lid: lesson.id });
+      saveState();
+      renderAll();
+      closeCheckinSheet();
+      toast(
+        "已打卡 +" +
+          delta +
+          " 分钟，今天累计 " +
+          (state.activity[todayKey()] || 0) +
+          " 分钟"
+      );
+      return;
+    }
+
+    const note = el.checkinSheetNote.value.trim().slice(0, 200);
+    addCheckinLog(item, note ? { note: note } : null);
+    saveState();
+    renderAll();
+    closeCheckinSheet();
+    toast("「" + item.name + "」已打卡");
   }
 
   /**
@@ -2386,6 +3072,9 @@
       return c.id !== id;
     });
     delete state.courseOpen[id];
+    (state.checkins || []).forEach(function (item) {
+      if (item.courseId === id) item.courseId = "";
+    });
     saveState();
     renderAll();
     toast("已删除《" + course.name + "》");
@@ -3152,6 +3841,7 @@
       details: state.details || {},
       demoDetails: state.demoDetails || {},
       todos: state.todos || [],
+      checkins: state.checkins || [],
       courseOpen: state.courseOpen || {},
       panelOpen: state.panelOpen || {},
     };
@@ -3164,7 +3854,8 @@
       Object.keys(state.demoActivity || {}).length > 0 ||
       Object.keys(state.details || {}).length > 0 ||
       Object.keys(state.demoDetails || {}).length > 0 ||
-      (state.todos || []).length > 0
+      (state.todos || []).length > 0 ||
+      (state.checkins || []).length > 0
     );
   }
 
@@ -4626,8 +5317,9 @@
       toast("这一天还没到，先专心过好今天");
       return;
     }
-    if (!state.activity[key] && !hasDayDetails(key)) {
-      toast("这天还没有学习记录");
+    const stats = dayStats(key);
+    if (!state.activity[key] && !hasDayDetails(key) && !stats.done && !stats.checkins) {
+      toast("这天还没有记录");
       return;
     }
     openDayDetail(key, cell);
@@ -4649,6 +5341,14 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
+    if (!el.checkinSheet.hidden) {
+      closeCheckinSheet();
+      return;
+    }
+    if (!el.checkinEditor.hidden) {
+      closeCheckinEditor();
+      return;
+    }
     if (!el.todoEditor.hidden) {
       closeTodoEditor();
       return;
@@ -4680,6 +5380,48 @@
   el.todoEditorClose.addEventListener("click", closeTodoEditor);
   el.todoEditor.addEventListener("click", function (e) {
     if (e.target.hasAttribute("data-todo-close")) closeTodoEditor();
+  });
+
+  // ---------- 循环打卡 ----------
+
+  el.checkinNewBtn.addEventListener("click", function () {
+    openCheckinEditor(null);
+  });
+  el.checkinEditorClose.addEventListener("click", closeCheckinEditor);
+  el.checkinEditor.addEventListener("click", function (e) {
+    if (e.target.hasAttribute("data-checkin-close")) closeCheckinEditor();
+  });
+  el.checkinKind.addEventListener("change", syncCheckinEditorFields);
+  el.checkinCadence.addEventListener("change", syncCheckinEditorFields);
+  el.checkinForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    saveCheckinFromEditor();
+  });
+
+  el.checkinList.addEventListener("click", function (e) {
+    const runBtn = e.target.closest("[data-checkin-run]");
+    if (runBtn) {
+      openCheckinSheet(runBtn.getAttribute("data-checkin-run"));
+      return;
+    }
+    const editBtn = e.target.closest("[data-checkin-edit]");
+    if (editBtn) {
+      openCheckinEditor(editBtn.getAttribute("data-checkin-edit"));
+      return;
+    }
+    const delBtn = e.target.closest("[data-checkin-del]");
+    if (delBtn) deleteCheckin(delBtn.getAttribute("data-checkin-del"));
+  });
+
+  el.checkinSheetClose.addEventListener("click", closeCheckinSheet);
+  el.checkinSheet.addEventListener("click", function (e) {
+    if (e.target.hasAttribute("data-checkin-sheet-close")) closeCheckinSheet();
+  });
+  el.checkinSheetCourse.addEventListener("change", refreshCheckinLessons);
+  el.checkinSheetLesson.addEventListener("change", updateCheckinProgress);
+  el.checkinRunForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    runCheckin();
   });
 
   // ---------- 待办批量导入 ----------
@@ -5143,7 +5885,8 @@
     if (
       state.courses.length === 0 &&
       Object.keys(state.activity).length === 0 &&
-      (state.todos || []).length === 0
+      (state.todos || []).length === 0 &&
+      (state.checkins || []).length === 0
     ) {
       toast("还没有数据可以导出");
       return;
@@ -5159,6 +5902,7 @@
         details: state.details || {},
         demoDetails: state.demoDetails || {},
         todos: state.todos || [],
+        checkins: state.checkins || [],
         courseOpen: state.courseOpen || {},
         panelOpen: state.panelOpen || {},
       },
@@ -5227,14 +5971,15 @@
     if (
       state.courses.length === 0 &&
       Object.keys(state.activity).length === 0 &&
-      (state.todos || []).length === 0
+      (state.todos || []).length === 0 &&
+      (state.checkins || []).length === 0
     ) {
       toast("现在就是空的，不用清");
       return;
     }
     if (
       !confirm(
-        "清空所有课程、打卡和待办？课程、每节已看时长、日历打卡、待办清单会一起清除，且不可撤销。建议先导出备份。"
+        "清空所有课程、打卡和待办？课程、每节已看时长、日历打卡、循环打卡、待办清单会一起清除，且不可撤销。建议先导出备份。"
       )
     ) {
       return;

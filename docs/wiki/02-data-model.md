@@ -57,6 +57,20 @@
       "dueNote": "老师口头通知"     // 可选，截止待确认时的补充说明，≤ 80 字符
     }
   ],
+  "checkins": [                  // 循环打卡项
+    {
+      "id": "c8x2mw4qa",
+      "name": "每天看一节视频",     // ≤ 40 字符
+      "kind": "video",            // video | custom
+      "cadence": "daily",         // daily | weekly | interval
+      "intervalDays": 3,          // cadence=interval 时生效，2–30
+      "courseId": "课程ID",        // video 可绑定课程；空串表示每次任选
+      "logs": [                   // 每周期一条；视频项当天可多条
+        { "date": "2026-11-09", "at": 1762660000000, "min": 15,
+          "cid": "课程ID", "lid": "课时ID" }
+      ]
+    }
+  ],
   "courseOpen": { "课程ID": true },        // 课程卡片展开状态
   "panelOpen": { "sync": false, "bili": false } // 底部折叠面板展开状态
 }
@@ -67,12 +81,13 @@
 | 字段 | 类型 | 约束 | 清洗函数 |
 | --- | --- | --- | --- |
 | `v` | number | 固定输出 2 | `sanitize` |
-| `schemaVersion` | number | 固定输出当前 `SCHEMA_VERSION`（3） | `sanitize` |
+| `schemaVersion` | number | 固定输出当前 `SCHEMA_VERSION`（4） | `sanitize` |
 | `courses` | array | 只保留 `name` 非空字符串的项 | `sanitize` |
 | `activity` | object | 键必须是 `YYYY-MM-DD`，值 0–99999，只保留 > 0 | `sanitize` |
 | `demoActivity` | object | 同上，但只记录示例部分 | `sanitize` |
 | `details` / `demoDetails` | object | 键 `YYYY-MM-DD`，值按 `cleanDetails` 合并 | `cleanDetails` |
 | `todos` | array | 按 `cleanTodos` 逐条白名单校验 | `cleanTodos` |
+| `checkins` | array | 按 `cleanCheckins` 校验；课程被删后 `courseId` 置空 | `cleanCheckins` |
 | `courseOpen` | object | 只保留仍存在课程且值为 `true` 的键 | `sanitize` |
 | `panelOpen` | object | 只读取 `sync` / `bili` 两个键的布尔值 | `sanitize` |
 
@@ -170,7 +185,8 @@ JSON.stringify(state) → localStorage.setItem
 7. `demoActivity`：同上但不做 v1 折算。
 8. `details` / `demoDetails`：`cleanDetails`。
 9. `todos`：`cleanTodos`。
-10. 输出统一 v2 结构。
+10. `checkins`：`cleanCheckins`，随后把指向已删除课程的 `courseId` 置空。
+11. 输出统一 v2 结构。
 
 ### 4.4 v1 → v2 迁移（`migrateCourseV1`）
 
@@ -210,7 +226,7 @@ doneSet = Set(done 数组中的整数)
 ```jsonc
 {
   "v": 2,
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "exportedAt": "2026-11-09T...Z",
   "courses": [...],
   "activity": {...},
@@ -218,6 +234,7 @@ doneSet = Set(done 数组中的整数)
   "details": {...},
   "demoDetails": {...},
   "todos": [...],
+  "checkins": [...],
   "courseOpen": {...},
   "panelOpen": {...}
 }
@@ -257,9 +274,9 @@ doneSet = Set(done 数组中的整数)
 
 | 场景 | 行为 |
 | --- | --- |
-| 本地数据 `schemaVersion > 3` | `schemaTooNew = true`，停止自动上传，状态行提示「请刷新页面」 |
-| 云端数据 `schemaVersion > 3` | `blockNewerSchema()`，停止上传并暂停自动拉取 |
-| 本地缺少 `todos` / `details` / `schemaVersion` | 按空数组 / 空对象 / 当前版本读取，不报错 |
+| 本地数据 `schemaVersion > 4` | `schemaTooNew = true`，停止自动上传，状态行提示「请刷新页面」 |
+| 云端数据 `schemaVersion > 4` | `blockNewerSchema()`，停止上传并暂停自动拉取 |
+| 本地缺少 `todos` / `checkins` / `details` / `schemaVersion` | 按空数组 / 空对象 / 当前版本读取，不报错 |
 | 上传数据接近 1 MB | `uploadTooBig()`：本地体积 > 900000 字符时拒绝上传并提示先导出备份 |
 
 ## 8. 数据清理的三种粒度
