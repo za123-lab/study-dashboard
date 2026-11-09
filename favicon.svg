@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="学业工作台">
+  <rect width="32" height="32" rx="7" fill="#20344e"/>
+  <rect x="7" y="5" width="18" height="22" rx="2" fill="#fbf8f0"/>
+  <rect x="7" y="5" width="3" height="22" rx="1.5" fill="#c0453a"/>
+  <rect x="13" y="10" width="9" height="2" rx="1" fill="#5a6b7f"/>
+  <rect x="13" y="15" width="7" height="2" rx="1" fill="#5a6b7f"/>
+  <rect x="13" y="20" width="8" height="2" rx="1" fill="#97a3b1"/>
+</svg>
