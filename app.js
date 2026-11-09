@@ -588,6 +588,8 @@
     supaLogoutBtn: $("#supaLogoutBtn"),
     supaSyncStatus: $("#supaSyncStatus"),
     supaLiveStatus: $("#supaLiveStatus"),
+    supaSqlText: $("#supaSqlText"),
+    supaSqlCopyBtn: $("#supaSqlCopyBtn"),
     syncPanel: $("#syncPanel"),
     syncToggle: $("#syncToggle"),
     syncFoldBody: $("#syncFoldBody"),
@@ -4264,7 +4266,7 @@
 
   async function loginWithPassword(email, password) {
     if (!supaConfigured()) {
-      setAuthStatus("error", "先保存 Supabase 地址与 anon key");
+      setAuthStatus("error", "先保存 Supabase 地址与 Publishable key");
       toast("先保存连接配置");
       return;
     }
@@ -4361,28 +4363,28 @@
 
     if (!rawKey) {
       failSupaConfig(
-        "请填写 anon key：新版以 sb_publishable_ 开头，旧版以 eyJ 开头，两种都支持",
+        "请填写 Publishable key：在 Supabase 的 Project Settings → API Keys 里复制 sb_publishable_ 开头的一段",
         el.supaKey
       );
       return;
     }
     if (/\s/.test(rawKey)) {
       failSupaConfig(
-        "anon key 中间不能有空格或换行，请从 Supabase 控制台重新完整复制一段",
+        "Publishable key 中间不能有空格或换行，请从 Supabase 控制台重新完整复制一段",
         el.supaKey
       );
       return;
     }
     if (/^sb_secret_/i.test(rawKey)) {
       failSupaConfig(
-        "这是 secret key（服务端密钥），不能填在网页里；请改用 anon public 或 sb_publishable_ key",
+        "这是 secret key（服务端密钥），不能填在网页里；请改用 Publishable key（sb_publishable_ 开头）",
         el.supaKey
       );
       return;
     }
     if (rawKey.length < 20) {
       failSupaConfig(
-        "anon key 太短，像是没复制完整；请重新复制完整一段（sb_publishable_ 或 eyJ 开头）",
+        "Publishable key 太短，像是没复制完整；请重新复制完整一段（sb_publishable_ 开头）",
         el.supaKey
       );
       return;
@@ -4952,6 +4954,16 @@
     el.supaKey.type = shown ? "password" : "text";
     el.supaKeyToggle.textContent = shown ? "显示" : "隐藏";
     el.supaKeyToggle.setAttribute("aria-pressed", String(!shown));
+  });
+
+  el.supaSqlCopyBtn.addEventListener("click", function () {
+    copyText(el.supaSqlText.textContent).then(function (ok) {
+      toast(
+        ok
+          ? "建表 SQL 已复制，去 Supabase SQL Editor 整段粘贴执行"
+          : "复制失败，请手动选中 SQL 复制"
+      );
+    });
   });
 
   el.supaCfgSave.addEventListener("click", saveSupaConfig);

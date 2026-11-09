@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="个人学业工作台：记录课程学习、待办清单与日程安排">
   <title>学业工作台</title>
-  <link rel="stylesheet" href="style.css?v=20261108-15">
+  <link rel="stylesheet" href="style.css?v=20261109-2">
 </head>
 <body>
   <!-- 笔记本左侧红色装订线（纯装饰） -->
@@ -377,10 +377,10 @@
               placeholder="https://xxxx.supabase.co">
           </label>
           <label class="field grow">
-            <span>anon key（可公开，安全由 RLS 保证）</span>
+            <span>Publishable key（可公开，安全由 RLS 保证）</span>
             <div class="secret-wrap">
               <input type="password" id="supaKey" class="mono" autocomplete="off" spellcheck="false"
-                placeholder="eyJhbGciOiJIUzI1NiIs...">
+                placeholder="sb_publishable_...">
               <button type="button" class="btn ghost secret-toggle" id="supaKeyToggle" aria-pressed="false">显示</button>
             </div>
           </label>
@@ -390,7 +390,7 @@
           <button type="button" class="btn ghost" id="supaCfgForget" hidden>清除配置</button>
         </div>
         <p class="sync-status mono" id="supaCfgStatus" role="status" aria-live="polite" data-state="idle">尚未保存连接配置</p>
-        <p class="sync-hint">URL 与 anon key 只存在这台设备的浏览器里，不会写进仓库。anon key 本来就是给浏览器用的公开密钥，数据安全靠表上的 RLS 策略。</p>
+        <p class="sync-hint">URL 与 Publishable key 只存在这台设备的浏览器里，不会写进仓库。Publishable key 本来就是给浏览器用的公开密钥，数据安全靠表上的 RLS 策略。</p>
       </div>
 
       <!-- 未登录 -->
@@ -434,13 +434,111 @@
         <h3 class="sync-guide-title">怎么接上云端</h3>
         <ol class="sync-guide">
           <li>打开 <b>supabase.com</b> 注册，点「New project」新建一个项目，等它初始化完成（一般一两分钟）。</li>
-          <li>进 <b>Project Settings → API</b>，复制 <b>Project URL</b> 和 <b>anon public</b> key。地址长这样：<code>https://你的项目编号.supabase.co</code>。</li>
-          <li>回到这一页，把 URL 和 key 粘进上面两个输入框，点「保存连接配置」。下方状态行显示「连接配置已保存」就说明存好了。</li>
-          <li>在 Supabase 控制台 <b>Authentication → Users → Add user</b> 建一个账号，回到这里用同一邮箱密码登录；按钮下方显示「已连接」和上次同步时间，就说明通了。</li>
-          <li>换设备时打开同一个网址，填同样的 URL 和 anon key，登录同一账号，数据会自动拉下来；两边都登录后，改动会互相同步。</li>
+          <li>进 <b>SQL Editor → New query</b>，点下面的「复制 SQL」，整段粘贴后点 <b>Run</b>。这段脚本可重复执行，负责建表、开启 RLS、授予权限并打开 Realtime。
+            <details class="sql-details">
+              <summary>查看 / 复制建表 SQL</summary>
+              <div class="prompt-box">
+                <pre class="sql-text mono" id="supaSqlText">-- ==========================================================
+-- 学业工作台 · Supabase 表结构与 RLS
+-- 用法：Supabase Dashboard → SQL Editor → 整段粘贴执行（可重复执行）
+-- 注意：本段与仓库 supabase/schema.sql 相同，改那边时请同步更新这里
+-- ==========================================================
+
+-- 整份进度存一行 JSON：
+-- 客户端始终整份读、整份写，单行更新天然是原子的；
+-- rev 由客户端在条件更新时 +1，作为乐观锁版本号。
+create table if not exists public.study_state (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  data       jsonb not null default '{}'::jsonb,
+  rev        bigint not null default 1 check (rev > 0),
+  updated_at timestamptz not null default now(),
+  constraint study_state_data_is_object check (jsonb_typeof(data) = 'object'),
+  constraint study_state_data_size check (octet_length(data::text) &lt;= 1000000)
+);
+
+comment on table public.study_state is '学业工作台：每个用户一行，data 为整份进度 JSON';
+
+-- 开启行级安全：默认谁也不能读写
+alter table public.study_state enable row level security;
+
+-- 只允许读写自己 auth.uid() 对应的那一行
+drop policy if exists "study_state_select_own" on public.study_state;
+create policy "study_state_select_own"
+  on public.study_state for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "study_state_insert_own" on public.study_state;
+create policy "study_state_insert_own"
+  on public.study_state for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "study_state_update_own" on public.study_state;
+create policy "study_state_update_own"
+  on public.study_state for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "study_state_delete_own" on public.study_state;
+create policy "study_state_delete_own"
+  on public.study_state for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+-- updated_at 只由数据库维护，客户端 PATCH 时不需要也不应该写它
+create or replace function public.study_state_touch()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists study_state_touch on public.study_state;
+create trigger study_state_touch
+  before update on public.study_state
+  for each row execute function public.study_state_touch();
+
+-- 表权限：登录用户可以读写，匿名用户完全拿不到
+grant select, insert, update, delete on public.study_state to authenticated;
+revoke all on public.study_state from anon;
+
+-- Realtime：把这张表加入 supabase_realtime 发布列表，
+-- 页面才能通过 WebSocket 收到「云端有新版本」的通知（页面里仍会用 REST 拉取整份数据）
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'study_state'
+  ) then
+    alter publication supabase_realtime add table public.study_state;
+  end if;
+end
+$$;
+
+-- 可选：执行完在 SQL Editor 里跑这两句做自检
+-- 期望 authenticated 返回 200 且只能看到自己那一行；anon 返回 401/空
+-- select * from public.study_state;
+</pre>
+                <button type="button" class="btn ghost prompt-copy" id="supaSqlCopyBtn">复制 SQL</button>
+              </div>
+            </details>
+          </li>
+          <li>复制 API 地址：进 <b>Project Settings → Data API</b>，在 <b>Project URL</b> 处复制地址，形如 <code>https://你的项目编号.supabase.co</code>。只复制到 <code>.supabase.co</code> 为止，不要带 <code>/rest/v1</code>。</li>
+          <li>复制 Publishable key：进 <b>Project Settings → API Keys</b>，复制以 <code>sb_publishable_</code> 开头的那一段。它是给浏览器用的公开密钥，可以放在网页里。</li>
+          <li>回到这一页，把 URL 和 Publishable key 粘进上面两个输入框，点「保存连接配置」。下方状态行显示「连接配置已保存」就说明存好了。</li>
+          <li>在 Supabase 控制台 <b>Authentication → Users → Add user</b> 建一个账号（勾选 Auto Confirm User），回到这里用同一邮箱密码登录；按钮下方显示「已连接」和上次同步时间，就说明通了。</li>
+          <li>换设备时打开同一个网址，填同样的 URL 和 key，登录同一账号，数据会自动拉下来；两边都登录后，改动会互相同步。</li>
           <li>两边都改过会弹窗让你选保留哪份，不会自动覆盖；第一次接通建议先点一次「立即上传」。</li>
         </ol>
-        <p class="sync-hint">只填 anon public key；service_role key 权限太大，不能放在浏览器里。anon key 本身可以公开，数据安全靠 Supabase 表上的 RLS 策略。</p>
+        <p class="sync-hint">URL 填 Data API 页的 Project URL；key 填 API Keys 页的 Publishable key（<code>sb_publishable_</code> 开头）。不要填 service_role / sb_secret_ 这类服务端密钥，权限太大，不能放在浏览器里。数据安全靠上面 SQL 里创建的 RLS 策略。</p>
       </div>
           </div>
         </div>
@@ -538,7 +636,7 @@
   <!-- 轻提示 -->
   <div class="toast mono" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261108-15"></script>
+  <script src="app.js?v=20261109-2"></script>
   <script>
     // 兜底：脚本被旧缓存/加载失败时，按钮不会静默失效
     setTimeout(function () {

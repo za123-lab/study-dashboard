@@ -6,7 +6,7 @@
 - 登录后：改动 1.5 秒防抖自动上传；另一台设备登录同一账号即可拉取
 - 云端和本机都改过时：弹窗让你选「以本地为准 / 以云端为准」，不会静默覆盖
 
-页面不硬编码任何 Supabase 地址或密钥，URL 与 anon key 在页面「设置 · 云同步」里填写，只存在本机浏览器。
+页面不硬编码任何 Supabase 地址或密钥，URL 与 Publishable key 在页面「设置 · 云同步」里填写，只存在本机浏览器。
 
 ## 1. 建项目
 
@@ -19,7 +19,7 @@
 ## 2. 建表与 RLS
 
 1. 进入项目 → 左侧 **SQL Editor** → New query
-2. 把 [`schema.sql`](./schema.sql) 整段粘贴进去 → Run
+2. 把 [`schema.sql`](./schema.sql) 整段粘贴进去 → Run（也可以直接用页面「设置 · 云同步」教程里「复制 SQL」按钮复制的同一段脚本）
 3. 确认没有报错。脚本可重复执行
 
 脚本会创建：
@@ -49,17 +49,18 @@
 
 如果看到「邮箱还没验证」，检查这个用户是否已确认，或在 Authentication → Providers → Email 里临时关掉 Confirm email。
 
-## 4. 取 URL 与 anon key
+## 4. 取 URL 与 Publishable key
 
-1. 项目 → 左下 **Project Settings** → **API**（新版界面也可能叫 **API Keys**）
-2. 复制 **Project URL**，形如 `https://abcdxyz.supabase.co`
-3. 复制 **anon public** key（新版叫 **publishable** key 也可以）
-4. **不要**复制 `service_role` / secret key：它绕过 RLS，绝不能放进网页
+新版控制台把地址和密钥拆到了两个页面：
+
+1. **地址**：项目 → 左下 **Project Settings → Data API**，复制 **Project URL**，形如 `https://abcdxyz.supabase.co`。复制到 `.supabase.co` 为止，**不要**带 `/rest/v1`。
+2. **密钥**：项目 → **Project Settings → API Keys**，复制 **Publishable key**（`sb_publishable_…` 开头）。
+3. **不要**复制 `service_role` 或 `sb_secret_…`：它们绕过 RLS，绝不能放进网页。
 
 ## 5. 填进页面
 
 1. 打开站点（线上 <https://za123-lab.github.io/study-dashboard/> 或本地 `index.html`）
-2. 滚到「设置 · 云同步」→ 填 Project URL、anon key → **保存连接配置**
+2. 滚到「设置 · 云同步」→ 填 Project URL、Publishable key → **保存连接配置**
 3. 输入第 3 步创建的邮箱、密码 → **登录**
 4. 登录后看到「已登录：你的邮箱」，首次会自动核对云端：
    - 云端为空：直接上传本机数据
@@ -83,13 +84,13 @@ Supabase 免费计划的项目在连续约 7 天没有任何 API / 数据库活�
 
 想少被暂停：隔几天打开页面记一笔（产生一次 API 请求）即可；仅打开 dashboard 不一定算活跃。
 
-## 7. 安全说明：anon key 为什么可以放浏览器
+## 7. 安全说明：Publishable key 为什么可以放浏览器
 
-anon key 是 Supabase 设计给浏览器公开使用的密钥，它的权限完全由 RLS 决定。本项目：
+Publishable key 是 Supabase 设计给浏览器公开使用的密钥，它的权限完全由 RLS 决定。本项目：
 
 - 所有策略都要求 `auth.uid() = user_id`，匿名请求拿不到任何行
 - `anon` 角色的表权限已收回
-- 页面只保存 anon key；service_role key 永远不要填进页面或提交到仓库
+- 页面只保存 Publishable key；service_role / sb_secret_ 永远不要填进页面或提交到仓库
 
 即便如此，本项目仍按你的要求不在仓库里硬编码 URL / key：配置写在页面里、存本机 `localStorage`（键名 `study-supabase-v1`），公开仓库里没有真实项目地址。
 
@@ -129,9 +130,10 @@ anon key 是 Supabase 设计给浏览器公开使用的密钥，它的权限完�
 ## 10. 需要你手动完成的事
 
 - [ ] 注册 Supabase，创建项目
-- [ ] SQL Editor 执行 `supabase/schema.sql`
+- [ ] SQL Editor 执行 `supabase/schema.sql`（或页面教程里一键复制的 SQL）
 - [ ] Authentication → Users 里创建你的邮箱账号（勾选 Auto Confirm）
-- [ ] Project Settings → API 复制 URL 与 anon public key
+- [ ] Project Settings → Data API 复制 Project URL
+- [ ] Project Settings → API Keys 复制 Publishable key
 - [ ] 页面里保存配置并登录
 - [ ] 第二台设备登录同一账号，确认能看到同一份进度
 
