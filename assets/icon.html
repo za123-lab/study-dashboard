@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>今日一页 · 图标</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #f5efe2; }
+  .icon { display: block; width: 1024px; height: 1024px; }
+</style>
+</head>
+<body>
+<svg class="icon" viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="rgba(32,52,78,0.09)" stroke-width="1.4"/>
+    </pattern>
+  </defs>
+
+  <!-- 纸底 + 方格 -->
+  <rect width="1024" height="1024" fill="#f5efe2"/>
+  <rect width="1024" height="1024" fill="url(#grid)"/>
+
+  <!-- 手绘方框：起笔收笔略不闭合，笔画粗细有起伏 -->
+  <g transform="translate(512 500) scale(1.32) translate(-523 -500)">
+  <path d="M262 256 C 432 247, 596 254, 776 249 C 785 392, 779 566, 787 741
+           C 642 750, 452 743, 268 753 C 257 606, 265 412, 259 262"
+        fill="none" stroke="#20344e" stroke-width="27"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.93"/>
+  <!-- 朱红勾 -->
+  <path d="M352 512 C 392 552, 428 596, 462 632 C 546 526, 626 434, 706 372"
+        fill="none" stroke="#c0453a" stroke-width="47"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 笔尖带出的一点墨与一处飞白，去掉机械感 -->
+  <circle cx="716" cy="360" r="7" fill="#c0453a" opacity="0.75"/>
+  <circle cx="345" cy="500" r="4.5" fill="#c0453a" opacity="0.45"/>
+  </g>
+</svg>
+</body>
+</html>

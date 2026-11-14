@@ -68,9 +68,9 @@
 
   // 待办类别与优先级（sanitize 读旧数据时会用到，必须在 state=loadState() 之前初始化）
   const TODO_CATS = {
-    study: "学业",
-    contest: "竞赛",
-    event: "赛事",
+    study: "学业课程",
+    contest: "学科竞赛",
+    event: "文体活动",
     other: "其他",
   };
   const TODO_PRI = ["P0", "P1", "P2"];
@@ -320,8 +320,6 @@
       name: String(c.name).slice(0, 40).trim(),
       lessons: lessons,
     };
-    // 示例课程打标记，用于界面提示与「清除示例数据」
-    if (c.demo === true) course.demo = true;
     // B 站导入来源：只有明确标记为 bili 才保留视频标题与 BV 号，
     // 旧数据没有这些字段时照常读取，手动登记的课程永远不会被当成 B 站来源
     if (c.source === "bili") {
@@ -391,7 +389,8 @@
       if (seenIds[id]) id = makeId();
       seenIds[id] = true;
 
-      const cat = TODO_CATS[item.cat] ? item.cat : "other";
+      // 旧数据里的 other 已并入学业课程
+      const cat = TODO_CATS[item.cat] ? item.cat : "study";
       const pri = TODO_PRI.indexOf(item.pri) >= 0 ? item.pri : "P1";
       const due =
         typeof item.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.due)
@@ -516,7 +515,7 @@
 
     const courses = rawCourses
       .filter(function (c) {
-        return c && typeof c.name === "string" && c.name.trim();
+        return c && typeof c.name === "string" && c.name.trim() && c.demo !== true;
       })
       .map(function (c) {
         return Array.isArray(c.lessons) ? cleanCourseV2(c) : migrateCourseV1(c);
@@ -560,8 +559,7 @@
     });
 
     if (isV1) migratedOnLoad = true;
-    // 示例打卡的分钟数单独记一份，清除示例时不误伤真实打卡
-    const demoActivity = {};
+    // 示例数据已下线：旧数据里残留的示例打卡从总量里扣掉，字段也一并清空
     const rawDemo =
       data.demoActivity && typeof data.demoActivity === "object"
         ? data.demoActivity
@@ -569,7 +567,13 @@
     Object.keys(rawDemo).forEach(function (k) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
       const value = clampInt(rawDemo[k], 0, 99999, 0);
-      if (value > 0) demoActivity[k] = value;
+      if (value <= 0) return;
+      const left = (activity[k] || 0) - value;
+      if (left > 0) {
+        activity[k] = left;
+      } else {
+        delete activity[k];
+      }
     });
 
     return {
@@ -577,9 +581,9 @@
       schemaVersion: SCHEMA_VERSION,
       courses: courses,
       activity: activity,
-      demoActivity: demoActivity,
+      demoActivity: {},
       details: cleanDetails(data.details),
-      demoDetails: cleanDetails(data.demoDetails),
+      demoDetails: {},
       todos: cleanTodos(data.todos),
       checkins: checkins,
       courseOpen: courseOpen,
@@ -621,10 +625,6 @@
     courseDefault: $("#courseDefault"),
     courseList: $("#courseList"),
     emptyState: $("#emptyState"),
-    seedBtn: $("#seedBtn"),
-    demoNotice: $("#demoNotice"),
-    demoNoticeText: $("#demoNoticeText"),
-    demoClearBtn: $("#demoClearBtn"),
     exportBtn: $("#exportBtn"),
     importBtn: $("#importBtn"),
     importFile: $("#importFile"),
@@ -670,6 +670,8 @@
     supaLogoutBtn: $("#supaLogoutBtn"),
     supaSyncStatus: $("#supaSyncStatus"),
     supaLiveStatus: $("#supaLiveStatus"),
+    supaHistList: $("#supaHistList"),
+    supaHistRefresh: $("#supaHistRefresh"),
     supaSqlText: $("#supaSqlText"),
     supaSqlCopyBtn: $("#supaSqlCopyBtn"),
     syncPanel: $("#syncPanel"),
@@ -790,7 +792,6 @@
       renderStats();
       renderCourses();
       renderHeatmap();
-      renderDemoNotice();
       renderHeatNote();
     } else if (name === "todo") {
       renderTodos();
@@ -1029,7 +1030,6 @@
       '<div class="course-title">' +
       "<h3>" +
       escapeHtml(course.name) +
-      (course.demo ? '<span class="demo-tag">示例</span>' : "") +
       "</h3>" +
       videoLine +
       '<p class="mono course-meta">' +
@@ -2082,7 +2082,6 @@
           escapeHtml(course.id) +
           '">' +
           escapeHtml(course.name) +
-          (course.demo ? "（示例）" : "") +
           "</option>"
       );
     });
@@ -2481,7 +2480,7 @@
     "2. 不要输出任何解释、开场白、结尾语，也不要用 ```json 代码块包裹。",
     "3. 每条待办只能有 title、cat、due、dueTime、pri、note、link 七个字段，不要添加其它字段。",
     "4. title：必填，任务标题原文，不要加序号，不要超过 120 字。",
-    "5. cat：类别，只接受 study、contest、event、other 四个值（分别对应 学业、竞赛、赛事、其他）。",
+    "5. cat：类别，只接受 study、contest、event、other 四个值（分别对应 学业课程、学科竞赛、文体活动、其他）。",
     "6. due：截止日期，只接受 YYYY-MM-DD，例如 2026-11-11；不确定就留空字符串 \"\"。",
     "7. dueTime：可选截止时间，只接受 HH:mm（24 小时制，00:00–23:59），例如 09:30；不确定就留空字符串 \"\"。",
     "8. pri：优先级，只接受 P0、P1、P2 三个值；不确定就留空字符串 \"\"。",
@@ -2503,13 +2502,16 @@
   // 类别既接受内部 key，也接受提示词里出现的中文标签
   const TODO_IMPORT_CAT_MAP = {
     study: "study",
+    学业课程: "study",
     学业: "study",
     contest: "contest",
+    学科竞赛: "contest",
     竞赛: "contest",
     event: "event",
+    文体活动: "event",
     赛事: "event",
-    other: "other",
     其他: "other",
+    other: "other",
   };
 
   let pendingTodoImport = null; // 预览通过、尚未确认写入的批次
@@ -2649,7 +2651,7 @@
             at +
               " 的 cat 字段非法：" +
               JSON.stringify(item.cat) +
-              "；只接受 study / contest / event / other（学业 / 竞赛 / 赛事 / 其他）。"
+              "；只接受 study / contest / event / other（学业课程 / 学科竞赛 / 文体活动 / 其他）。"
           );
           bad = true;
         } else {
@@ -2777,7 +2779,7 @@
               "<tr><td>" +
               escapeHtml(t.title) +
               "</td><td>" +
-              escapeHtml(TODO_CATS[t.cat] || "其他") +
+              escapeHtml(TODO_CATS[t.cat] || "学业课程") +
               "</td><td>" +
               due +
               "</td><td>" +
@@ -2875,36 +2877,6 @@
     el.streakNum.textContent = streak;
   }
 
-  /** 示例数据的规模：几门示例课程、几天示例打卡 */
-  function demoSummary() {
-    let demoCourses = 0;
-    state.courses.forEach(function (c) {
-      if (c.demo) demoCourses++;
-    });
-    let demoDays = 0;
-    let demoMin = 0;
-    Object.keys(state.demoActivity || {}).forEach(function (k) {
-      demoDays++;
-      demoMin += state.demoActivity[k];
-    });
-    return { demoCourses: demoCourses, demoDays: demoDays, demoMin: demoMin };
-  }
-
-  /** 当前是否还在看示例数据 —— 明确提示，避免把演示进度当成真实记录 */
-  function renderDemoNotice() {
-    const s = demoSummary();
-    const show = s.demoCourses > 0 || s.demoDays > 0;
-    el.demoNotice.hidden = !show;
-    if (!show) return;
-    const parts = [];
-    if (s.demoCourses) parts.push(s.demoCourses + " 门示例课程");
-    if (s.demoDays) {
-      parts.push(s.demoDays + " 天示例打卡（共 " + s.demoMin + " 分钟）");
-    }
-    el.demoNoticeText.textContent =
-      "当前是示例数据：" + parts.join("、") + "，不是你的真实学习记录。";
-  }
-
   /** 打卡有记录但一门课都没有时，说明这些记录已失去来源 */
   function renderHeatNote() {
     let total = 0;
@@ -2975,61 +2947,7 @@
     state.details[key] = list;
   }
 
-  /** 从日历里扣掉示例打卡的部分，真实打卡保留；示例明细整份清掉 */
-  function subtractDemoActivity() {
-    Object.keys(state.demoActivity || {}).forEach(function (key) {
-      const left = (state.activity[key] || 0) - state.demoActivity[key];
-      if (left > 0) {
-        state.activity[key] = left;
-      } else {
-        delete state.activity[key];
-      }
-    });
-    state.demoActivity = {};
-    state.demoDetails = {};
-  }
-
-  /** 清除示例：示例课程 + 示例打卡，自己登记的课程和打卡不动 */
-  function clearDemoData() {
-    const s = demoSummary();
-    if (!s.demoCourses && !s.demoDays) {
-      toast("现在没有示例数据");
-      return;
-    }
-    const parts = [];
-    if (s.demoCourses) parts.push(s.demoCourses + " 门示例课程");
-    if (s.demoDays) {
-      parts.push(s.demoDays + " 天示例打卡（共 " + s.demoMin + " 分钟）");
-    }
-    if (
-      !confirm(
-        "清除示例数据？将删掉 " +
-          parts.join("、") +
-          "。你自己登记的课程和打卡不受影响。"
-      )
-    ) {
-      return;
-    }
-
-    const demoIds = new Set();
-    state.courses.forEach(function (c) {
-      if (c.demo) demoIds.add(c.id);
-    });
-    state.courses = state.courses.filter(function (c) {
-      return !c.demo;
-    });
-    subtractDemoActivity();
-
-    demoIds.forEach(function (id) {
-      delete state.courseOpen[id];
-    });
-
-    saveState();
-    renderAll();
-    toast("已清除示例数据，示例打卡也一并清掉了");
-  }
-
-  /** 重置打卡：只清 activity / demoActivity，课程与每节已看时长保留 */
+  /** 重置打卡：只清 activity，课程与每节已看时长保留 */
   function resetActivity() {
     const total = Object.keys(state.activity).length;
     if (total === 0) {
@@ -4953,6 +4871,7 @@
     el.supaWho.textContent = supaSession.email || supaSession.userId;
     el.supaAuto.checked = !!supaCfg.auto;
     updateSyncHead();
+    loadHistoryList();
   }
 
   async function loginWithPassword(email, password) {
@@ -5708,6 +5627,132 @@
     });
   });
 
+  // ---------- 历史版本（study_state_history） ----------
+  function historyEmpty(text) {
+    if (!el.supaHistList) return;
+    el.supaHistList.textContent = "";
+    const p = document.createElement("p");
+    p.className = "sync-hint";
+    p.textContent = text;
+    el.supaHistList.appendChild(p);
+  }
+
+  async function loadHistoryList() {
+    if (!el.supaHistList || !supaSession) return;
+    if (!isOnline()) {
+      historyEmpty("当前离线，历史版本需要联网查看");
+      return;
+    }
+    try {
+      const session = await ensureSession();
+      const res = await restRequest(
+        "/rest/v1/study_state_history?user_id=eq." +
+          encodeURIComponent(session.userId) +
+          "&select=id,rev,archived_at&order=id.desc&limit=10",
+        { method: "GET" }
+      );
+      if (!res.ok) {
+        if (res.status === 404) {
+          historyEmpty("云端还没有历史表：先在 SQL Editor 执行 supabase/history.sql");
+          return;
+        }
+        throw new Error(await restErrorText(res));
+      }
+      const rows = await res.json();
+      if (!Array.isArray(rows) || !rows.length) {
+        historyEmpty("还没有历史版本。改动一次并同步后就会出现。");
+        return;
+      }
+      el.supaHistList.textContent = "";
+      rows.forEach(function (row) {
+        const item = document.createElement("div");
+        item.className = "sync-history-row";
+
+        const rev = document.createElement("span");
+        rev.className = "sync-history-rev mono";
+        rev.textContent = "rev " + row.rev;
+
+        const when = document.createElement("span");
+        when.className = "sync-history-time";
+        const ts = Date.parse(row.archived_at || "");
+        when.textContent = ts ? timeLabel(ts) : String(row.archived_at || "");
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn ghost sync-history-btn";
+        btn.textContent = "恢复";
+        btn.addEventListener("click", function () {
+          restoreHistoryVersion(Number(row.id), Number(row.rev));
+        });
+
+        item.appendChild(rev);
+        item.appendChild(when);
+        item.appendChild(btn);
+        el.supaHistList.appendChild(item);
+      });
+    } catch (err) {
+      historyEmpty(String((err && err.message) || err));
+    }
+  }
+
+  /** 把某一版历史当作新版本写回云端，然后覆盖本机 */
+  async function restoreHistoryVersion(id, rev) {
+    if (
+      !confirm(
+        "恢复到 rev " + rev + "？\n这一版会作为新版本写回云端，并覆盖本机当前数据。"
+      )
+    ) {
+      return;
+    }
+    setSyncStatus("busy", "正在恢复 rev " + rev + "…");
+    try {
+      const session = await ensureSession();
+      const histRes = await restRequest(
+        "/rest/v1/study_state_history?id=eq." + id + "&select=rev,data&limit=1",
+        { method: "GET" }
+      );
+      if (!histRes.ok) throw new Error(await restErrorText(histRes));
+      const histRows = await histRes.json();
+      if (!histRows.length) throw new Error("这条历史记录已经不在了");
+      const snapshotData = histRows[0].data;
+
+      const remote = await fetchRemote();
+      if (!remote) throw new Error("云端还没有数据");
+      const nextRev = remote.rev + 1;
+      const res = await restRequest(
+        "/rest/v1/study_state?user_id=eq." +
+          encodeURIComponent(session.userId) +
+          "&rev=eq." +
+          remote.rev,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({ data: snapshotData, rev: nextRev }),
+        }
+      );
+      if (!res.ok) throw new Error(await restErrorText(res));
+      const rows = await res.json();
+      if (!rows || !rows.length) throw new Error("云端刚被改过，再点一次恢复");
+
+      applyRemote(
+        { data: snapshotData, rev: nextRev },
+        "已恢复到 rev " + rev + "（现为 rev " + nextRev + "）"
+      );
+      toast("已恢复到 rev " + rev);
+      loadHistoryList();
+    } catch (err) {
+      setSyncStatus("error", String((err && err.message) || err));
+      toast("恢复失败");
+    }
+  }
+
+  el.supaHistRefresh.addEventListener("click", function () {
+    loadHistoryList();
+  });
+
   el.supaCfgSave.addEventListener("click", saveSupaConfig);
   el.supaCfgForget.addEventListener("click", forgetSupaConfig);
 
@@ -5780,103 +5825,6 @@
     closeConflict();
     setSyncStatus("conflict", "冲突未解决：云端与本机各自保留，手动同步时会再次提示");
     toast("已暂时搁置冲突，自动同步暂停");
-  });
-
-  el.seedBtn.addEventListener("click", function () {
-    const today = new Date();
-
-    const cLessons = [];
-    for (let i = 1; i <= 86; i++) {
-      let totalMin = 45;
-      let watchedMin = i <= 12 ? 45 : 0;
-      if (i === 13) {
-        // 示例：一节 1 小时 23 分，看到 43 分钟
-        totalMin = 83;
-        watchedMin = 43;
-      }
-      cLessons.push({ id: makeId(), totalMin: totalMin, watchedMin: watchedMin });
-    }
-
-    const bLessons = [];
-    for (let i = 1; i <= 24; i++) {
-      bLessons.push({
-        id: makeId(),
-        totalMin: 30,
-        watchedMin: i <= 8 ? 30 : 0,
-      });
-    }
-
-    // 只替换上一次的示例课程，自己登记的课程保留
-    state.courses = state.courses.filter(function (c) {
-      return !c.demo;
-    });
-
-    state.courses.push(
-      {
-        id: makeId(),
-        name: "C 语言程序设计",
-        lessons: cLessons,
-        demo: true,
-      },
-      {
-        id: makeId(),
-        name: "大学计算机基础",
-        lessons: bLessons,
-        demo: true,
-      }
-    );
-    const cCourse = state.courses[state.courses.length - 2];
-    const bCourse = state.courses[state.courses.length - 1];
-
-    // 先扣掉上一次的示例打卡与明细，再写入新的，避免重复叠加
-    subtractDemoActivity();
-    const demo = {};
-    [7, 6, 5, 3, 2, 1].forEach(function (back, idx) {
-      const key = dateKey(addDays(today, -back));
-      const min = [45, 90, 20, 60, 30, 120][idx];
-      demo[key] = min;
-      state.activity[key] = (state.activity[key] || 0) + min;
-    });
-    state.demoActivity = demo;
-
-    // 示例明细：每天拆到具体课时，分钟数与示例打卡总量对得上
-    const demoPlan = [
-      [7, cCourse, 1, 45],
-      [6, cCourse, 2, 45],
-      [6, cCourse, 3, 45],
-      [5, cCourse, 13, 20],
-      [3, cCourse, 4, 45],
-      [3, cCourse, 5, 15],
-      [2, bCourse, 1, 30],
-      [1, cCourse, 6, 45],
-      [1, cCourse, 7, 45],
-      [1, bCourse, 2, 30],
-    ];
-    const demoDetails = {};
-    let order = 0;
-    demoPlan.forEach(function (row) {
-      const back = row[0];
-      const course = row[1];
-      const lessonNo = row[2];
-      const min = row[3];
-      const day = addDays(today, -back);
-      const key = dateKey(day);
-      const list = demoDetails[key] || (demoDetails[key] = []);
-      list.push({
-        cid: course.id,
-        lid: course.lessons[lessonNo - 1].id,
-        idx: lessonNo,
-        min: min,
-        at:
-          new Date(day.getFullYear(), day.getMonth(), day.getDate(), 20, 0).getTime() +
-          order++ * 1000,
-      });
-    });
-    state.demoDetails = demoDetails;
-
-    saveState();
-    renderAll();
-    toast("已填入示例课程（带「示例」标记），随时可以一键清除");
   });
 
   // ---------- 导入导出 ----------
@@ -5990,7 +5938,6 @@
     toast("已清空课程、打卡和待办，本子重新开张");
   });
 
-  el.demoClearBtn.addEventListener("click", clearDemoData);
   el.resetActivityBtn.addEventListener("click", resetActivity);
   el.heatResetBtn.addEventListener("click", resetActivity);
 

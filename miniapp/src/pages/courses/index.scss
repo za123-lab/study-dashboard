@@ -1,0 +1,147 @@
+.overall {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  margin-bottom: 4px;
+}
+
+.overall-num {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.course-block {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(32, 52, 78, 0.08);
+}
+
+.course-block:last-child {
+  border-bottom: none;
+}
+
+.course-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.course-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-pct {
+  flex: none;
+  font-size: 12px;
+  color: var(--red);
+}
+
+.bar {
+  height: 5px;
+  margin: 7px 0 4px;
+  background: rgba(32, 52, 78, 0.09);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--red);
+  border-radius: 3px;
+}
+
+.course-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.lesson-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px dashed rgba(32, 52, 78, 0.1);
+}
+
+.lesson-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.lesson-done {
+  flex: none;
+  font-size: 10px;
+  color: var(--red);
+  border: 1px solid rgba(192, 69, 58, 0.4);
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
+.course-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sheet-del {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--red-deep);
+  text-decoration: underline;
+}
+
+/* 宽屏：课程卡片铺成两栏，一屏能同时看到更多门课 */
+@media (min-width: 540PX) {
+  .overall {
+    gap: 30PX;
+  }
+
+  .overall-num {
+    font-size: 28PX;
+  }
+
+  .course-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    column-gap: 26PX;
+  }
+
+  .course-name {
+    font-size: 14PX;
+  }
+
+  .course-pct {
+    font-size: 12PX;
+  }
+
+  .course-meta {
+    font-size: 10.5PX;
+  }
+
+  .lesson-name {
+    font-size: 12PX;
+  }
+
+  .lesson-time {
+    font-size: 10.5PX;
+  }
+}
+

@@ -1,0 +1,525 @@
+.day-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(24, 36, 52, 0.42);
+}
+
+.day-card {
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 18px 18px 28px;
+  background: var(--paper-2);
+  border-radius: 8px 8px 0 0;
+}
+
+.day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.day-title {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.day-close {
+  font-size: 12px;
+  color: var(--red);
+}
+
+.day-total {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.day-metrics {
+  display: block;
+  margin: 2px 0 6px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.day-block {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.day-h {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.day-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.day-line-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-line-done {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.day-line-min {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.day-line-tag {
+  flex: none;
+  font-size: 9px;
+  color: var(--red);
+  border: 1px solid rgba(192, 69, 58, 0.4);
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
+/* ---------- 输入框 ---------- */
+.prompt-field {
+  position: relative;
+  height: 40px;
+  overflow: hidden;
+  margin-top: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+/* 输入框下面的方格纸刻度，让它像写在纸上 */
+.prompt-field::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 5px;
+  background-image: linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: 8px 5px;
+  opacity: 0.7;
+}
+
+.prompt-input {
+  display: block;
+  width: 100%;
+  height: 30px;
+  font-size: 16px;
+  line-height: 30px;
+  color: var(--ink);
+}
+
+/* 宽屏：底部抽屉改成居中的浮层卡片，避免整行被拉得过宽 */
+@media (min-width: 540PX) {
+  .day-mask {
+    align-items: center;
+    justify-content: center;
+    padding: 24PX;
+  }
+
+  .day-card {
+    width: 560PX;
+    max-width: 100%;
+    max-height: 82vh;
+    padding: 18PX 20PX 24PX;
+    border-radius: 6PX;
+    box-shadow: 0 12PX 40PX rgba(24, 36, 52, 0.26);
+  }
+
+  .day-title {
+    font-size: 17PX;
+  }
+
+  .day-close {
+    font-size: 12PX;
+  }
+
+  .day-total {
+    font-size: 13.5PX;
+  }
+
+  .day-metrics {
+    font-size: 11.5PX;
+  }
+
+  .day-h {
+    font-size: 11.5PX;
+  }
+
+  .day-line-name {
+    font-size: 13PX;
+  }
+
+  .day-line-min {
+    font-size: 11PX;
+  }
+
+  .day-line-tag {
+    font-size: 9PX;
+  }
+}
+
+/* ---------- 表单面板 ---------- */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(24, 36, 52, 0.46);
+}
+
+.sheet-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 86vh;
+  padding: 18px 18px 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  background: var(--paper-2);
+  border-top: 1.5px solid var(--ink);
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 -10px 30px rgba(24, 36, 52, 0.18);
+  overflow: hidden;
+  animation: sheet-up 180ms ease-out;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.sheet-head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet-kicker {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--red);
+}
+
+.sheet-title {
+  display: block;
+  margin-top: 2px;
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.sheet-close {
+  flex: none;
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 26px;
+  color: var(--red);
+}
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 4px;
+}
+
+.form-group {
+  margin-top: 16px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+}
+
+.form-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.lesson-fields {
+  display: flex;
+}
+
+.lesson-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.lesson-field + .lesson-field {
+  margin-left: 14px;
+}
+
+.sheet-msg {
+  display: block;
+  padding: 6px 0 2px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: -8px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  margin: 0 8px 8px 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: transparent;
+}
+
+.chip-on {
+  color: var(--paper-2);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.chip-disabled {
+  color: var(--ink-faint);
+  border-style: dashed;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.stepper-btn {
+  width: 30px;
+  height: 30px;
+  margin-right: 10px;
+  font-size: 17px;
+  line-height: 28px;
+  text-align: center;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+
+.stepper-num {
+  min-width: 34px;
+  margin-right: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.stepper-cap {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.sheet-foot {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 18px;
+}
+
+.sheet-btn {
+  width: 48%;
+  height: 46px;
+  box-sizing: border-box;
+  font-size: 15px;
+  line-height: 46px;
+  text-align: center;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+
+.sheet-btn-cancel {
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+}
+
+.sheet-btn-ok {
+  color: var(--paper-2);
+  background: var(--red);
+  border: 1px solid var(--red);
+  letter-spacing: 0.08em;
+}
+
+.panel-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.panel-actions .link-btn + .link-btn {
+  margin-left: 12px;
+}
+
+/* ---------- 迷你日历 ---------- */
+.mini-cal {
+  margin-top: 12px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+}
+
+.mini-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 8px;
+}
+
+.mini-cal-month {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.mini-cal-nav {
+  padding: 2px 8px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.mini-cal-week,
+.mini-cal-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.mini-cal-week {
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--rule);
+  margin-bottom: 4px;
+}
+
+.mini-cal-wd {
+  width: 14.2857%;
+  font-size: 9.5px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--ink-faint);
+}
+
+.mini-cell {
+  width: 14.2857%;
+  height: 30px;
+  font-size: 12px;
+  line-height: 30px;
+  text-align: center;
+  color: var(--ink);
+  border-radius: 3px;
+}
+
+.mini-cell-out {
+  color: var(--ink-faint);
+  opacity: 0.5;
+}
+
+.mini-cell-today {
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.mini-cell-on {
+  color: var(--paper-2);
+  background: var(--ink);
+}
+
+@media (min-width: 540PX) {
+  .sheet-mask {
+    align-items: center;
+    justify-content: center;
+    padding: 24PX;
+  }
+
+  .sheet-card {
+    width: 440PX;
+    max-width: 100%;
+    max-height: 84vh;
+    padding: 18PX 20PX 20PX;
+    border-radius: 6PX;
+    box-shadow: 0 12PX 40PX rgba(24, 36, 52, 0.26);
+  }
+
+  .sheet-kicker {
+    font-size: 9PX;
+  }
+
+  .sheet-title {
+    font-size: 19PX;
+  }
+
+  .form-label {
+    font-size: 10.5PX;
+  }
+
+  .form-hint {
+    font-size: 11PX;
+  }
+
+  .chip {
+    font-size: 12.5PX;
+  }
+
+  .stepper-cap {
+    font-size: 11.5PX;
+  }
+}
+
+

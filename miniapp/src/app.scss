@@ -1,0 +1,451 @@
+/* 今日一页 — 方格纸学习手账
+   暖米色纸底 / 墨蓝字迹 / 朱红批注 */
+
+page {
+  --paper: #f6f1e5;
+  --paper-2: #fbf8f0;
+  --ink: #20344e;
+  --ink-soft: #5a6b7f;
+  --ink-faint: #97a3b1;
+  --red: #c0453a;
+  --red-deep: #9e3128;
+  --rule: #d9d1be;
+  --line: rgba(32, 52, 78, 0.14);
+  --u-overdue: #c0453a;
+  --u-soon: #b4741f;
+  --u-week: #a08a2c;
+  --u-far: #6f8398;
+
+  min-height: 100%;
+  color: var(--ink);
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  background-color: var(--paper);
+  background-image: linear-gradient(rgba(32, 52, 78, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(32, 52, 78, 0.045) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+view,
+text,
+input,
+button {
+  box-sizing: border-box;
+}
+
+.mono {
+  font-family: 'Consolas', 'Menlo', monospace;
+  letter-spacing: 0.02em;
+}
+
+.page {
+  padding: 18px 18px 40px;
+}
+
+/* 报头 */
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.kicker {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--red);
+  margin-bottom: 2px;
+}
+
+.title {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.today-line {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* 连续打卡印章 */
+.stamp {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  border: 1.5px solid var(--red);
+  border-radius: 50%;
+  color: var(--red);
+  transform: rotate(-7deg);
+}
+
+.stamp-num {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stamp-label {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+/* 面板 */
+.panel {
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 16px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 2px rgba(32, 52, 78, 0.06);
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.panel-title {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.panel-cap {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+
+.link-btn {
+  flex: none;
+  font-size: 12px;
+  color: var(--red);
+}
+
+.empty {
+  display: block;
+  padding: 14px 0;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* 按钮 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.btn::after {
+  border: none;
+}
+
+.btn-primary {
+  color: var(--paper-2);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-disabled {
+  color: var(--ink-faint);
+  border-color: rgba(32, 52, 78, 0.1);
+}
+
+/* 今日指标 */
+.today-metrics {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  margin-bottom: 14px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.metric-num {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.metric-num-red {
+  color: var(--red);
+}
+
+.metric-cap {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+/* 列表行 */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(32, 52, 78, 0.07);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-title {
+  display: block;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.row-done .row-title {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--u-far);
+}
+
+.dot-overdue {
+  background: var(--u-overdue);
+}
+
+.dot-soon {
+  background: var(--u-soon);
+}
+
+.dot-week {
+  background: var(--u-week);
+}
+
+/* 优先级 / 类别小标签 */
+.tag {
+  display: inline-block;
+  padding: 1px 5px;
+  margin-right: 5px;
+  font-size: 10px;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--ink-soft);
+}
+
+.tag-p0 {
+  color: var(--red);
+  border-color: rgba(192, 69, 58, 0.45);
+}
+
+/* 分段控制器 */
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.seg-item {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 12.5px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.seg-item-on {
+  color: var(--paper-2);
+  background: var(--ink);
+}
+
+/* ---------- 宽屏：折叠屏展开态 / 平板 / 横屏 ----------
+   不做等比放大：字号和间距用 PX 锁死，多出来的宽度用来并排多放一栏 */
+@media (min-width: 540PX) {
+  page {
+    font-size: 15PX;
+    background-size: 24PX 24PX;
+  }
+
+  .page {
+    max-width: 1040PX;
+    margin: 0 auto;
+    padding: 20PX 24PX 36PX;
+  }
+
+  .masthead {
+    padding-bottom: 10PX;
+    margin-bottom: 14PX;
+  }
+
+  .kicker {
+    font-size: 10PX;
+  }
+
+  .title {
+    font-size: 24PX;
+  }
+
+  .today-line {
+    font-size: 12PX;
+  }
+
+  .stamp {
+    width: 58PX;
+    height: 58PX;
+  }
+
+  .stamp-num {
+    font-size: 19PX;
+  }
+
+  .stamp-label {
+    font-size: 8PX;
+  }
+
+  .panel {
+    padding: 14PX 16PX;
+  }
+
+  .panel-head {
+    padding-bottom: 8PX;
+    margin-bottom: 10PX;
+  }
+
+  .panel-title {
+    font-size: 16PX;
+  }
+
+  .panel-cap {
+    font-size: 11PX;
+  }
+
+  .link-btn {
+    font-size: 12PX;
+  }
+
+  .empty {
+    padding: 12PX 0;
+    font-size: 12PX;
+  }
+
+  .btn {
+    padding: 6PX 12PX;
+    font-size: 12.5PX;
+  }
+
+  .btn-small {
+    padding: 4PX 9PX;
+    font-size: 11.5PX;
+  }
+
+  .today-metrics {
+    gap: 26PX;
+  }
+
+  .metric-num {
+    font-size: 22PX;
+  }
+
+  .metric-cap {
+    font-size: 10PX;
+  }
+
+  .row {
+    gap: 9PX;
+    padding: 8PX 0;
+  }
+
+  .row-title {
+    font-size: 13.5PX;
+  }
+
+  .row-sub {
+    font-size: 10.5PX;
+  }
+
+  .tag {
+    font-size: 9.5PX;
+  }
+
+  .seg {
+    max-width: 420PX;
+  }
+
+  .seg-item {
+    padding: 6PX 0;
+    font-size: 12PX;
+  }
+
+  /* 并排容器：窄屏是普通纵向排列，宽屏才变成两栏 */
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: 14PX;
+    margin-bottom: 14PX;
+  }
+
+  .cols > .panel {
+    margin-bottom: 0;
+  }
+
+  .cols .panel {
+    height: 100%;
+  }
+}
+

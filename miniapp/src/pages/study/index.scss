@@ -1,0 +1,133 @@
+.heat-wrap {
+  display: flex;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.heat-week {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cell {
+  width: 100%;
+  height: 0;
+  padding-bottom: 100%;
+  border-radius: 1.5px;
+  background: rgba(32, 52, 78, 0.07);
+}
+
+.cell-l1 {
+  background: #f0cfc9;
+}
+
+.cell-l2 {
+  background: #e2a79d;
+}
+
+.cell-l3 {
+  background: #cc6a5e;
+}
+
+.cell-l4 {
+  background: #9e3128;
+}
+
+.cell-stats {
+  box-shadow: inset 0 0 0 1px rgba(192, 69, 58, 0.55);
+}
+
+.cell-future {
+  opacity: 0.3;
+}
+
+.cell-today {
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.legend-cell {
+  width: 10px;
+  height: 10px;
+  padding-bottom: 0;
+  border-radius: 1.5px;
+}
+
+.legend-gap {
+  margin: 0 3px;
+}
+
+.checkin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(32, 52, 78, 0.07);
+}
+
+.checkin-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.checkin-name {
+  display: block;
+  font-size: 14px;
+}
+
+.checkin-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.checkin-count {
+  font-size: 10px;
+  color: var(--red);
+  margin-left: 5px;
+}
+
+/* 宽屏：热力图格子靠多铺周数消化宽度，文字不再等比放大 */
+@media (min-width: 540PX) {
+  .heat-wrap {
+    max-width: 760PX;
+    gap: 4PX;
+  }
+
+  .heat-week {
+    gap: 4PX;
+  }
+
+  .legend {
+    font-size: 10PX;
+  }
+
+  .checkin-row {
+    gap: 9PX;
+    padding: 9PX 0;
+  }
+
+  .checkin-name {
+    font-size: 13.5PX;
+  }
+
+  .checkin-meta {
+    font-size: 10.5PX;
+  }
+
+  .checkin-count {
+    font-size: 9.5PX;
+  }
+}

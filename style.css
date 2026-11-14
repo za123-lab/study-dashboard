@@ -1280,6 +1280,68 @@ input:focus {
   color: var(--ink-faint);
 }
 
+/* ---------- 云同步：历史版本 ---------- */
+
+.sync-history {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rule);
+}
+
+.sync-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sync-history-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sync-history-refresh {
+  padding: 3px 10px;
+  font-size: 11.5px;
+}
+
+.sync-history-list {
+  margin-top: 4px;
+}
+
+.sync-history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.sync-history-row:last-child {
+  border-bottom: 0;
+}
+
+.sync-history-rev {
+  flex: none;
+  width: 72px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.sync-history-time {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.sync-history-btn {
+  flex: none;
+  padding: 3px 12px;
+  font-size: 11.5px;
+}
+
+
 /* ---------- 页面底部的折叠面板（云同步 / B 站导入） ---------- */
 
 .fold-panel {

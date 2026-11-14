@@ -146,18 +146,11 @@
     <!-- 课程列表 -->
     <section class="courses" id="courseList" aria-live="polite"></section>
 
-    <!-- 示例数据提示：示例课程与示例打卡可一键清除，不影响真实记录 -->
-    <div class="demo-notice" id="demoNotice" hidden>
-      <p class="demo-notice-text" id="demoNoticeText"></p>
-      <button type="button" class="btn ghost" id="demoClearBtn">清除示例数据</button>
-    </div>
-
     <!-- 空状态 -->
     <div class="empty state-box" id="emptyState" data-kind="empty" hidden>
       <div class="empty-icon" aria-hidden="true">✎</div>
       <h3>本子还是空的</h3>
-      <p>在上方登记第一门课程，或者先看看示例效果：</p>
-      <button class="btn ghost" id="seedBtn">填入示例课程</button>
+      <p>在上方登记第一门课程，课时会按节数一次生成。</p>
     </div>
     </div><!-- /viewStudy -->
 
@@ -180,9 +173,9 @@
             <span>类别</span>
             <select id="todoCatFilter">
               <option value="all">全部类别</option>
-              <option value="study">学业</option>
-              <option value="contest">竞赛</option>
-              <option value="event">赛事</option>
+              <option value="study">学业课程</option>
+              <option value="contest">学科竞赛</option>
+              <option value="event">文体活动</option>
               <option value="other">其他</option>
             </select>
           </label>
@@ -452,6 +445,15 @@
         <p class="sync-status mono" id="supaSyncStatus" role="status" aria-live="polite">尚未同步</p>
         <p class="sync-status mono sync-live" id="supaLiveStatus" role="status" aria-live="polite" data-state="idle">实时：等待登录后连接</p>
         <p class="sync-hint">登录后会自动接收云端改动：实时订阅 + 回到前台立即检查 + 每 60 秒兜底检查，同一时刻只发一个拉取请求。断网时照常记在本机，联网后会自动补传。若云端与本地都被改过，会弹窗让你选「以本地为准 / 以云端为准」，不会自动覆盖。</p>
+
+        <div class="sync-history">
+          <div class="sync-history-head">
+            <span class="sync-history-title">历史版本</span>
+            <button type="button" class="btn ghost sync-history-refresh" id="supaHistRefresh">刷新</button>
+          </div>
+          <p class="sync-hint">每次写入云端前自动留一版，云端保留最近 20 版。恢复会把它作为新版本写回，两端都会跟着回滚。</p>
+          <div class="sync-history-list" id="supaHistList"></div>
+        </div>
       </div>
 
       <!-- 使用教程：直接写在面板里，不再套一层折叠 -->
@@ -618,9 +620,9 @@ $$;
           <label class="field">
             <span>类别</span>
             <select id="todoCat">
-              <option value="study">学业</option>
-              <option value="contest">竞赛</option>
-              <option value="event">赛事</option>
+              <option value="study">学业课程</option>
+              <option value="contest">学科竞赛</option>
+              <option value="event">文体活动</option>
               <option value="other">其他</option>
             </select>
           </label>

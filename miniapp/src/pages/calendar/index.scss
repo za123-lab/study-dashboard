@@ -1,0 +1,165 @@
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.cal-month {
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.cal-nav {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.cal-weekbar {
+  display: flex;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-week {
+  flex: 1;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+.cal-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+
+.cal-cell {
+  width: 14.28%;
+  padding: 3px;
+}
+
+.cal-inner {
+  min-height: 54px;
+  padding: 4px 3px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.cal-inner-today {
+  border-color: var(--ink);
+}
+
+.cal-inner-out {
+  opacity: 0.32;
+}
+
+.cal-num {
+  display: block;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.cal-min {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  color: var(--red);
+  line-height: 1.2;
+}
+
+.cal-stat {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  color: var(--ink-faint);
+  line-height: 1.2;
+}
+
+.cal-dots {
+  display: flex;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.cal-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.cal-summary {
+  display: flex;
+  gap: 20px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+/* 宽屏：字号锁住，月度统计挪到右侧当侧栏，日历本体不再横向拉长 */
+@media (min-width: 540PX) {
+  .cal-month {
+    font-size: 19PX;
+  }
+
+  .cal-nav {
+    padding: 3PX 10PX;
+    font-size: 12PX;
+  }
+
+  .cal-week {
+    font-size: 10.5PX;
+  }
+
+  .cal-inner {
+    min-height: 58PX;
+  }
+
+  .cal-num {
+    font-size: 13PX;
+  }
+
+  .cal-min,
+  .cal-stat {
+    font-size: 9PX;
+  }
+
+  .cal-summary {
+    font-size: 11.5PX;
+  }
+}
+
+@media (min-width: 760PX) {
+  .cal-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 240PX;
+    column-gap: 22PX;
+    align-items: start;
+  }
+
+  .cal-head,
+  .cal-weekbar,
+  .cal-grid {
+    grid-column: 1;
+  }
+
+  .cal-summary {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    flex-direction: column;
+    gap: 8PX;
+    margin-top: 0;
+    padding: 0 0 0 18PX;
+    border-top: none;
+    border-left: 1px dashed var(--line);
+  }
+}
+

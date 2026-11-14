@@ -1,0 +1,253 @@
+.todo-cats {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: 10px;
+}
+
+.todo-cats .chip {
+  flex: 0 0 auto;
+  padding: 0 9px;
+  margin: 0 6px 0 0;
+  font-size: 12px;
+}
+
+.todo-actions {
+  display: flex;
+  align-items: center;
+}
+
+.todo-actions .todo-add {
+  margin-left: 14px;
+}
+
+.imp-tip {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.imp-btns {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.imp-btn {
+  width: 48%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.imp-error {
+  padding: 8px 10px;
+  border: 1px dashed var(--red);
+  border-radius: 3px;
+  background: rgba(192, 69, 58, 0.05);
+}
+
+.imp-error-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--red-deep);
+}
+
+.imp-preview {
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+}
+
+.imp-summary {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.imp-row {
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.imp-title {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.imp-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.imp-more {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.todo-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.todo-count {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.todo-add {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--paper-2);
+  background: var(--ink);
+  border-radius: 4px;
+}
+
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(32, 52, 78, 0.07);
+}
+
+.todo-row:last-child {
+  border-bottom: none;
+}
+
+.todo-box {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--paper-2);
+}
+
+.todo-box-on {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.todo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-title {
+  display: block;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.todo-title-done {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.todo-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.todo-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.todo-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--red-deep);
+  text-decoration: underline;
+}
+
+.todo-side {
+  flex: none;
+  text-align: right;
+}
+
+.todo-left {
+  display: block;
+  font-size: 11px;
+}
+
+.todo-left-overdue {
+  color: var(--u-overdue);
+}
+
+.todo-left-soon {
+  color: var(--u-soon);
+}
+
+.todo-left-week {
+  color: var(--u-week);
+}
+
+.todo-left-far {
+  color: var(--ink-faint);
+}
+
+/* 宽屏：待办列表铺成两栏，一屏能看完更多条，而不是把每条拉得更宽 */
+@media (min-width: 540PX) {
+  .todo-top {
+    margin-bottom: 10PX;
+  }
+
+  .todo-count {
+    font-size: 12PX;
+  }
+
+  .todo-add {
+    padding: 5PX 12PX;
+    font-size: 12.5PX;
+  }
+
+  .todo-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    column-gap: 24PX;
+  }
+
+  .todo-row {
+    padding: 10PX 0;
+  }
+
+  .todo-title {
+    font-size: 13.5PX;
+  }
+
+  .todo-meta {
+    font-size: 10.5PX;
+  }
+
+  .todo-left {
+    font-size: 10.5PX;
+  }
+}
+

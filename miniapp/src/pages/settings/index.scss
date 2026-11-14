@@ -1,0 +1,180 @@
+.sync-page {
+  padding-bottom: 40px;
+}
+
+.sync-head {
+  display: flex;
+  align-items: flex-start;
+}
+
+.sync-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #97a3b1;
+}
+
+.sync-dot-ok {
+  background: #2f6b52;
+}
+
+.sync-dot-error {
+  background: #c0453a;
+}
+
+.sync-dot-conflict {
+  background: #c98a2e;
+}
+
+.sync-dot-syncing {
+  background: #20344e;
+}
+
+.sync-msg {
+  flex: 1;
+  font-size: 14px;
+  line-height: 20px;
+  color: #20344e;
+}
+
+.sync-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #d9d1be;
+}
+
+.sync-meta-item {
+  font-size: 11px;
+  color: #97a3b1;
+}
+
+.sync-conflict {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8f2e2;
+  border: 1px solid #e3d7bd;
+  border-radius: 4px;
+}
+
+.sync-conflict-tip {
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+  color: #5a6b7f;
+}
+
+.btn-row {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.btn-main,
+.btn-ghost {
+  width: 48%;
+  height: 44px;
+  box-sizing: border-box;
+  font-size: 14px;
+  line-height: 44px;
+  text-align: center;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.btn-main {
+  background: #c0453a;
+  color: #fbf8f0;
+}
+
+.btn-main-off {
+  opacity: 0.5;
+}
+
+.btn-ghost {
+  border: 1px solid #20344e;
+  color: #20344e;
+}
+
+.btn-ghost-danger {
+  border-color: #c0453a;
+  color: #c0453a;
+}
+
+.field {
+  margin-top: 14px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #97a3b1;
+}
+
+.field-input {
+  width: 100%;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #20344e;
+  background: #fffdf7;
+  border: 1px solid #d9d1be;
+  border-radius: 4px;
+}
+
+.field-ph {
+  color: #b3bcc7;
+}
+
+.sync-note {
+  display: block;
+  margin-top: 14px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #97a3b1;
+}
+
+.sync-clear {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 12px;
+  color: #c0453a;
+}
+
+.hist-row {
+  display: flex;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px dashed #e4dccb;
+}
+
+.hist-row:last-child {
+  border-bottom: 0;
+}
+
+.hist-rev {
+  width: 76px;
+  font-size: 12px;
+  color: #20344e;
+}
+
+.hist-time {
+  flex: 1;
+  font-size: 12px;
+  color: #97a3b1;
+}
+
+.hist-act {
+  flex: none;
+  padding-left: 12px;
+  font-size: 12px;
+  color: #c0453a;
+}
