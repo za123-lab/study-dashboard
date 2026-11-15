@@ -19,6 +19,7 @@
 - **可选云同步**：登录 Supabase 后整份进度备份到云端，多设备通过乐观锁（`rev`）安全合并。
 - **AI 辅助录入**：B 站课程、待办清单都通过「复制提示词 → 交给任意 AI → 粘贴 JSON → 预览 → 确认写入」的方式导入，前端不直接调用第三方接口。
 - **零后端依赖**：仓库里的 `worker/` 是历史方案（Cloudflare Workers + D1），页面当前不再请求它。
+- **微信小程序**：`miniapp/` 是同一套数据结构的 Taro 端，经自建云函数读写同一个 Supabase，现状见 [项目状态总览](../PROJECT-STATUS.md)。
 
 ## 2. 文档目录
 
@@ -31,6 +32,7 @@
 | [05 云同步](05-cloud-sync.md) | Supabase 认证、PostgREST、`rev` 乐观锁、Realtime、冲突状态机 | 改同步逻辑的人 |
 | [06 Worker（已停用）](06-worker.md) | Cloudflare Worker 路由契约、D1 表结构、安全策略 | 需要复活旧方案的人 |
 | [07 运行与部署](07-run-and-deploy.md) | 本地运行、静态托管、Supabase 接入、故障排查 | 首次部署的人 |
+| [项目状态总览](../PROJECT-STATUS.md) | 两端功能对照、云同步现状、隐私合规、发布流程、遗留事项 | 想快速了解当前进度的人 |
 
 ## 3. 仓库文件清单
 
@@ -65,7 +67,7 @@ study-dashboard/
 ## 5. 三分钟跑起来
 
 1. 直接用浏览器打开 `index.html`（或 `python -m http.server 8765` 后访问）。
-2. 点「填入示例课程」即可看到完整界面与示例数据。
+2. 新建一门课程和几条待办，即可开始记录。
 3. 需要多设备同步时，按 [07 运行与部署](07-run-and-deploy.md) 第 4 节接入 Supabase。
 
 ## 6. 维护约定
