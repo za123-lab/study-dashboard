@@ -3956,14 +3956,21 @@ body::after {
 
 @media (hover: hover) and (pointer: fine) {
   .btn.ghost:hover {
-    background-color: rgba(255, 255, 255, 0.36);
+    /* 必须重声明 background-image：基础 .btn.ghost:hover 的 background 简写
+       会把渐变重置为 none，只写 background-color 会让玻璃层 hover 时突然变平。 */
+    background-image: linear-gradient(118deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.24) 48%, rgba(255, 255, 255, 0.12));
+    background-color: transparent;
     border-color: rgba(255, 255, 255, 0.92);
     box-shadow: inset 0 1px 0 #fff, 0 6px 14px -8px rgba(32, 52, 78, 0.28);
   }
 
   .btn.primary:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 22px -12px rgba(32, 52, 78, 0.7);
+    /* 关键：基础 .btn.primary:hover 用 background 简写把渐变抹成 none（特异性 0,3,0
+       高于常态 0,2,0），若这里只写 background-color，深色按钮 hover 就变透明。
+       显式重声明深色渐变，hover 只做微妙提亮，保持实心按钮的质感与可读性。 */
+    background-image: linear-gradient(160deg, #355270 0%, #243d56 55%, #22384e 100%);
+    background-color: transparent;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 14px 22px -12px rgba(32, 52, 78, 0.72);
   }
 
   input:hover {
