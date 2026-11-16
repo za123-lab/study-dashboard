@@ -4039,8 +4039,11 @@ input:focus {
 
 .glass-select.is-open .glass-select-face,
 .glass-select:focus-within .glass-select-face {
-  border-color: var(--red);
-  box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 2px rgba(192, 69, 58, 0.18);
+  /* 2px 实红：1px 在圆角弧线处被抗锯齿摊薄成浅粉，四角看起来像被裁断。
+     光环改淡并加柔化，避免在圆角处盖过红线。 */
+  border: 2px solid var(--red);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 3px rgba(192, 69, 58, 0.1),
+    0 2px 8px rgba(192, 69, 58, 0.1);
 }
 
 .glass-select-face {
