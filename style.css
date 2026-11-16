@@ -3807,7 +3807,7 @@ input:focus {
    Apple 液态玻璃材质（已纳入正式页面）
    ========================================================== */
 
-{
+:root {
   --glass: rgba(251, 248, 240, 0.58);
   --glass-strong: rgba(251, 248, 240, 0.82);
   --glass-edge: rgba(255, 255, 255, 0.75);
@@ -4037,9 +4037,10 @@ input:focus {
   pointer-events: none;
 }
 
+.glass-select.is-open .glass-select-face,
 .glass-select:focus-within .glass-select-face {
-  outline: 2px solid var(--red);
-  outline-offset: 2px;
+  border-color: var(--red);
+  box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 2px rgba(192, 69, 58, 0.18);
 }
 
 .glass-select-face {
@@ -4060,7 +4061,6 @@ input:focus {
   pointer-events: none;
   background: linear-gradient(118deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1) 48%, rgba(255, 255, 255, 0));
   border: 1px solid var(--glass-edge);
-  border-bottom: 1.5px solid var(--ink);
   border-radius: 8px;
   box-shadow: inset 0 1px 0 var(--glass-edge);
 }
