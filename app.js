@@ -6032,3 +6032,197 @@
 
   document.documentElement.setAttribute("data-app-ready", "1");
 })();
+
+/* ==========================================================
+   玻璃下拉：原生 select 保留值/表单/键盘语义，
+   外观与展开列表由一层玻璃 UI 接管（原生弹出列表各家浏览器都改不了）。
+   预览阶段独立引入；正式应用时并入 app.js。
+   ========================================================== */
+
+(function () {
+  "use strict";
+
+  var WRAP = "glass-select";
+  var PANEL = "glass-select-panel";
+  var OPT = "glass-select-option";
+  var CLOSE_MS = 140; // 退场比进场短：系统响应要利落
+  var reduceMotion = window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+
+  var openWrap = null;
+  var closeTimer = null;
+
+  function labelOf(select) {
+    var i, o = select.selectedOptions && select.selectedOptions[0];
+    if (o) return o.textContent.trim();
+    for (i = 0; i < select.options.length; i++) {
+      if (select.options[i].selected) return select.options[i].textContent.trim();
+    }
+    return "";
+  }
+
+  function syncFace(select) {
+    var face = select.parentNode.querySelector(".glass-select-face");
+    if (face) face.textContent = labelOf(select);
+  }
+
+  function buildPanel(wrap) {
+    var select = wrap.querySelector("select");
+    var panel = wrap.querySelector("." + PANEL);
+    var frag = document.createDocumentFragment();
+    var options = Array.prototype.slice.call(select.options);
+
+    panel.textContent = "";
+    options.forEach(function (opt) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = OPT;
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", opt.selected ? "true" : "false");
+      b.textContent = opt.textContent.trim();
+      b.disabled = opt.disabled;
+      b.addEventListener("click", function () {
+        select.value = opt.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        close();
+        select.focus();
+      });
+      b.addEventListener("keydown", function (e) {
+        var items = Array.prototype.slice.call(panel.querySelectorAll("." + OPT + ":not([disabled])"));
+        var i = items.indexOf(b);
+        // 显式确认，避免不同环境对 focus 中 button 的原生 Enter 激活不一致
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          b.click();
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          items[(i + 1) % items.length].focus();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          items[(i - 1 + items.length) % items.length].focus();
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          items[0].focus();
+        } else if (e.key === "End") {
+          e.preventDefault();
+          items[items.length - 1].focus();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+          select.focus();
+        }
+      });
+      frag.appendChild(b);
+    });
+    panel.appendChild(frag);
+  }
+
+  function open(wrap) {
+    clearTimeout(closeTimer);
+    if (openWrap && openWrap !== wrap) close(true);
+
+    var select = wrap.querySelector("select");
+    var panel = wrap.querySelector("." + PANEL);
+    buildPanel(wrap);
+
+    openWrap = wrap;
+    panel.hidden = false;
+    select.setAttribute("aria-expanded", "true");
+    void panel.offsetWidth; // 强制回流，让 opacity/transform 从初始态起跳
+    wrap.classList.add("is-open");
+
+    var chosen = panel.querySelector('[aria-selected="true"]:not([disabled])') ||
+      panel.querySelector("." + OPT + ":not([disabled])");
+    if (chosen) chosen.focus();
+  }
+
+  function close(immediate) {
+    if (!openWrap) return;
+    var wrap = openWrap;
+    var select = wrap.querySelector("select");
+    var panel = wrap.querySelector("." + PANEL);
+
+    openWrap = null;
+    select.setAttribute("aria-expanded", "false");
+    wrap.classList.remove("is-open");
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(function () {
+      // 期间可能又打开了同一个，别把新列表清掉
+      if (wrap !== openWrap) {
+        panel.hidden = true;
+        panel.textContent = "";
+      }
+    }, immediate || reduceMotion ? 0 : CLOSE_MS);
+  }
+
+  function wrapSelect(select) {
+    if (select.parentNode && select.parentNode.classList.contains(WRAP)) return;
+
+    var wrap = document.createElement("span");
+    var face = document.createElement("span");
+    var trigger = document.createElement("button");
+    var panel = document.createElement("span");
+
+    wrap.className = WRAP;
+    face.className = "glass-select-face";
+    trigger.type = "button";
+    trigger.className = "glass-select-trigger";
+    trigger.tabIndex = -1;
+    trigger.setAttribute("aria-hidden", "true");
+    panel.className = PANEL;
+    panel.setAttribute("role", "listbox");
+    panel.hidden = true;
+
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select);
+    wrap.appendChild(face);
+    wrap.appendChild(trigger);
+    wrap.appendChild(panel);
+
+    select.classList.add("glass-select-native");
+    select.setAttribute("aria-haspopup", "listbox");
+    select.setAttribute("aria-expanded", "false");
+    syncFace(select);
+
+    // 触控/鼠标：原生 select 不可点，触发按钮接管
+    trigger.addEventListener("click", function (e) {
+      e.preventDefault();
+      if (openWrap === wrap) close();
+      else open(wrap);
+    });
+
+    // 键盘：焦点仍在原生 select 上，拦截默认的原生列表
+    select.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        open(wrap);
+      }
+    });
+
+    // 外部改动值（含 app.js 直接赋值）也要同步显示
+    select.addEventListener("change", function () {
+      syncFace(select);
+    });
+  }
+
+  document.addEventListener("mousedown", function (e) {
+    if (openWrap && !openWrap.contains(e.target)) close();
+  });
+  window.addEventListener("resize", function () {
+    if (openWrap) close(true);
+  });
+  window.addEventListener("scroll", function () {
+    if (openWrap) close(true);
+  }, true);
+
+  function init() {
+    Array.prototype.forEach.call(document.querySelectorAll("select"), wrapSelect);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();

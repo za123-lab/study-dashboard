@@ -3795,3 +3795,426 @@ input:focus {
     transform: none !important;
   }
 }
+
+/* ==========================================================
+   Apple 液态玻璃材质（Web 端正式版）
+   材质沿用小程序 1.1.8 配方：斜高光 + 暖白半透明 + 亮顶边/暗底边。
+   静态面不加 backdrop-filter；只有真有内容从底下滚过的面用 blur：
+   吸顶页签 / 弹层遮罩与卡片 / 吐司 / 自定义下拉面板。
+   ========================================================== */
+
+/* ==========================================================
+   Apple 液态玻璃材质（已纳入正式页面）
+   ========================================================== */
+
+{
+  --glass: rgba(251, 248, 240, 0.58);
+  --glass-strong: rgba(251, 248, 240, 0.82);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-shadow: 0 16px 36px -18px rgba(32, 52, 78, 0.2),
+    0 2px 8px rgba(32, 52, 78, 0.04);
+  /* 复用小程序项目 token，不平行新建 */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* 环境光：让「透」有内容可透，仍保持纸色系的低饱和暖调 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 42% at 88% 6%, rgba(192, 69, 58, 0.1), transparent 70%),
+    radial-gradient(44% 46% at 4% 62%, rgba(84, 122, 166, 0.1), transparent 72%),
+    radial-gradient(32% 32% at 64% 96%, rgba(206, 160, 82, 0.1), transparent 70%);
+}
+
+/* ---------- 静态玻璃面：斜高光 + 暖白半透明 + 边缘透光，无 blur ---------- */
+
+.panel,
+.ring-card,
+.stat-card,
+.course {
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.48) 0%, rgba(255, 255, 255, 0.12) 30%, rgba(255, 255, 255, 0) 48%),
+    linear-gradient(155deg, rgba(255, 255, 255, 0.66) 0%, var(--glass) 52%, rgba(246, 241, 229, 0.54) 100%);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 -1px 0 rgba(32, 52, 78, 0.06),
+    inset 0 0 0 1px rgba(32, 52, 78, 0.035);
+}
+
+.panel {
+  border-radius: 18px;
+}
+
+.ring-card,
+.stat-card {
+  border-radius: 16px;
+}
+
+.course {
+  /* 上面的 border 简写会盖掉课程卡的朱红书脊，补回来 */
+  border-left: 3px solid var(--red);
+  border-radius: 14px;
+}
+
+/* 首屏卡是主角，玻璃稍实一点，保证密集待办文字可读 */
+.today-panel {
+  border-radius: 20px;
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.12) 32%, rgba(255, 255, 255, 0) 50%),
+    linear-gradient(155deg, rgba(255, 255, 255, 0.72) 0%, rgba(251, 248, 240, 0.66) 52%, rgba(246, 241, 229, 0.6) 100%);
+}
+
+.ring-inner {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.76), rgba(251, 248, 240, 0.66));
+  box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 0 0 1px rgba(32, 52, 78, 0.08);
+}
+
+/* 内嵌的「纸面」区域：轻玻璃 + 圆角，不叠第二层亮渐变 */
+.prompt-box,
+.bili-json,
+.state-box {
+  background: rgba(255, 255, 255, 0.34);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 2px rgba(32, 52, 78, 0.04);
+}
+
+.state-box[data-kind="error"] {
+  background: rgba(192, 69, 58, 0.06);
+}
+
+/* ---------- 吸顶分段控件：唯一「有内容从底下滚过」的导航玻璃 ---------- */
+
+.view-tabs {
+  position: sticky;
+  top: 12px;
+  z-index: 8;
+  width: min(560px, 100%);
+  gap: 4px;
+  margin: 4px auto 30px;
+  padding: 5px;
+  border: 1px solid var(--glass-edge);
+  border-bottom: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.12) 44%, rgba(255, 255, 255, 0) 60%),
+    rgba(251, 248, 240, 0.66);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(32, 52, 78, 0.05);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+}
+
+.view-tab {
+  flex: 1 1 0;
+  max-width: none;
+  min-height: 44px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  transition: color 180ms var(--ease-out), background-color 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+}
+
+.view-tab.is-active {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.72));
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(32, 52, 78, 0.14), inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgba(32, 52, 78, 0.06);
+}
+
+/* ---------- 按钮：按压反馈保留 160ms，悬停只在精确指针下生效 ---------- */
+
+.btn {
+  border-radius: 10px;
+  transition: transform 160ms var(--ease-out), box-shadow 180ms var(--ease-out),
+    background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.btn.primary {
+  color: var(--paper-2);
+  background: linear-gradient(160deg, #2c445f 0%, var(--ink) 55%, #1b2d41 100%);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 10px 18px -12px rgba(32, 52, 78, 0.6);
+}
+
+.btn.ghost {
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.1) 48%, rgba(255, 255, 255, 0));
+  border-color: var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-edge), 0 1px 2px rgba(32, 52, 78, 0.04);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn.ghost:hover {
+    background-color: rgba(255, 255, 255, 0.36);
+    border-color: rgba(255, 255, 255, 0.92);
+    box-shadow: inset 0 1px 0 #fff, 0 6px 14px -8px rgba(32, 52, 78, 0.28);
+  }
+
+  .btn.primary:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 22px -12px rgba(32, 52, 78, 0.7);
+  }
+
+  input:hover {
+    background: rgba(255, 255, 255, 0.42);
+  }
+
+  .stamp:hover {
+    transform: rotate(0deg) scale(1.03);
+  }
+}
+
+/* ---------- 输入：保留手账下划线，补一点玻璃聚焦反馈 ---------- */
+
+input[type="text"],
+input[type="number"],
+input[type="url"],
+input[type="email"],
+input[type="password"] {
+  border-radius: 8px;
+  transition: border-color 180ms var(--ease-out), background-color 180ms ease,
+    box-shadow 180ms var(--ease-out);
+}
+
+input:focus {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 3px rgba(192, 69, 58, 0.08);
+}
+
+/* ---------- 弹层：底下有真实内容，才用 blur ---------- */
+
+.modal-backdrop {
+  background: rgba(32, 52, 78, 0.4);
+  /* 14px 足够把底下的密集文字糊掉，卡片保持半透明才不会丢失玻璃感 */
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.modal-card {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 20px;
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1) 36%, rgba(255, 255, 255, 0) 52%),
+    linear-gradient(155deg, rgba(255, 255, 255, 0.95), rgba(251, 248, 240, 0.93) 52%, rgba(246, 241, 229, 0.91));
+  box-shadow: 0 30px 70px -24px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(32, 52, 78, 0.07);
+  backdrop-filter: blur(24px) saturate(175%);
+  -webkit-backdrop-filter: blur(24px) saturate(175%);
+}
+
+/* 吐司浮在内容之上，用深色玻璃，退场沿用原有时序 */
+.toast {
+  color: var(--paper-2);
+  background: rgba(32, 52, 78, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 18px 30px -16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+
+/* ---------- 下拉：原生列表改玻璃面板 ---------- */
+
+.glass-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+}
+
+.glass-select-native {
+  position: relative;
+  z-index: 1;
+  min-height: 44px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.glass-select:focus-within .glass-select-face {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+.glass-select-face {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 32px 8px 12px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1) 48%, rgba(255, 255, 255, 0));
+  border: 1px solid var(--glass-edge);
+  border-bottom: 1.5px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
+
+.glass-select-face::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--ink-soft);
+  border-bottom: 1.5px solid var(--ink-soft);
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform 180ms var(--ease-out);
+}
+
+.glass-select.is-open .glass-select-face::after {
+  transform: translateY(-30%) rotate(225deg);
+}
+
+.glass-select-trigger {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* 面板是低频组件：180ms 从触发点上方显影，退场 140ms */
+.glass-select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100%;
+  max-height: 260px;
+  padding: 5px;
+  overflow: auto;
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.12) 42%, rgba(255, 255, 255, 0) 60%),
+    rgba(251, 248, 240, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px -16px rgba(32, 52, 78, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(32, 52, 78, 0.06);
+  backdrop-filter: blur(24px) saturate(175%);
+  -webkit-backdrop-filter: blur(24px) saturate(175%);
+  opacity: 0;
+  transform: translateY(-5px) scale(0.98);
+  transform-origin: top left;
+  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+  pointer-events: none;
+}
+
+/* display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式补回 */
+.glass-select-panel[hidden] {
+  display: none;
+}
+
+.glass-select.is-open .glass-select-panel {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.glass-select-option {
+  flex: none;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+
+.glass-select-option:hover,
+.glass-select-option:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+/* 选中项用朱红细标，不再出现系统默认的灰色高亮块 */
+.glass-select-option[aria-selected="true"] {
+  color: var(--red-deep);
+  font-weight: 600;
+  background: rgba(192, 69, 58, 0.09);
+}
+
+.glass-select-option[aria-selected="true"]::before {
+  content: "✓  ";
+}
+
+.glass-select-option[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- 无障碍降级 ---------- */
+
+/* reduced-motion 复用本文件上方的全局 !important 规则：只留淡入淡出，去位移与缩放 */
+
+@media (prefers-reduced-transparency: reduce) {
+  body::after {
+    display: none;
+  }
+
+  .panel,
+  .ring-card,
+  .stat-card,
+  .course,
+  .today-panel,
+  .prompt-box,
+  .bili-json,
+  .state-box,
+  .modal-card {
+    background: var(--paper-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .view-tabs,
+  .modal-backdrop,
+  .toast,
+  .glass-select-panel,
+  .glass-select-face {
+    background: var(--paper-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .toast {
+    color: var(--ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-select-panel,
+  .glass-select-face::after {
+    transform: none !important;
+    transition-property: opacity !important;
+    transition-duration: 140ms !important;
+  }
+}
