@@ -1,4 +1,7 @@
+import { useEffect } from 'react'
 import { View, Text } from '@tarojs/components'
+import { pushOverlay, popOverlay } from '../data/overlay'
+import { useDismiss } from '../data/motion'
 import { fmtDur, keyToDate, WEEK_CN } from '../data/date'
 import {
   dayStats,
@@ -24,6 +27,15 @@ function lessonName(entry: DetailItem): string {
 }
 
 export default function DayDetail(props: Props) {
+  const { closing, dismiss } = useDismiss(props.onClose)
+
+  useEffect(function () {
+    pushOverlay()
+    return function () {
+      popOverlay()
+    }
+  }, [])
+
   const state = getState()
   const key = props.dayKey
   const min = state.activity[key] || 0
@@ -49,12 +61,15 @@ export default function DayDetail(props: Props) {
   const isEmpty =
     !items.length && !min && !dayTodos.length && !checkinLogs.length && !stats.done && !doneTodos.length
 
+  const maskCls = 'day-mask' + (closing ? ' mask-closing' : '')
+  const cardCls = 'day-card' + (closing ? ' card-closing' : '')
+
   return (
-    <View className='day-mask' onClick={props.onClose}>
-      <View className='day-card' onClick={function (e) { e.stopPropagation() }}>
+    <View className={maskCls} onClick={dismiss}>
+      <View className={cardCls} onClick={function (e) { e.stopPropagation() }}>
         <View className='day-head'>
           <Text className='day-title'>{title}</Text>
-          <Text className='day-close' onClick={props.onClose}>关闭</Text>
+          <Text className='day-close' onClick={dismiss}>关闭</Text>
         </View>
 
         <Text className='day-total mono'>

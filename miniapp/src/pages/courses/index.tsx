@@ -28,6 +28,8 @@ export default function CoursesPage() {
 
   useDidShow(
     useCallback(function () {
+      Taro.eventCenter.trigger('custom-tabbar:select', 3)
+      Taro.setNavigationBarTitle({ title: '课程' })
       reload()
       autoSync().then(function () {
         reload()

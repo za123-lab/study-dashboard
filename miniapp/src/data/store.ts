@@ -293,11 +293,17 @@ export function dayStats(key: string): { done: number; checkins: number } {
   state.todos.forEach(function (t) {
     if (t.done && t.doneAt && dateKey(new Date(t.doneAt)) === key) done++
   })
+  // 同一天同一条打卡可以累加多条记录（例如分几次看视频），但当天只算一次打卡
   let checkins = 0
   state.checkins.forEach(function (item) {
-    item.logs.forEach(function (log) {
-      if (log.date === key) checkins++
-    })
+    let hitToday = false
+    for (let i = 0; i < item.logs.length; i++) {
+      if (item.logs[i].date === key) {
+        hitToday = true
+        break
+      }
+    }
+    if (hitToday) checkins++
   })
   return { done: done, checkins: checkins }
 }
@@ -355,7 +361,8 @@ export function checkinNextKey(item: Checkin): string | null {
 }
 
 export function checkinCanRun(item: Checkin): boolean {
-  if (item.cadence === 'daily') return !checkinDoneToday(item)
+  // 每天打卡允许一天内累加多次记录（分次看视频/分次学习）
+  if (item.cadence === 'daily') return true
   if (item.cadence === 'weekly') return !checkinDoneThisWeek(item)
   const next = checkinNextKey(item)
   if (!next) return true
@@ -364,6 +371,10 @@ export function checkinCanRun(item: Checkin): boolean {
 
 export function checkinStatusText(item: Checkin): string {
   if (checkinCanRun(item)) {
+    // daily 当天已记过：告诉用户可以继续累加，而不是已完成
+    if (item.cadence === 'daily' && checkinDoneToday(item)) {
+      return '今天已记，可继续累加'
+    }
     return item.kind === 'video' && item.courseId ? '可以打卡' : '今天可以打卡'
   }
   if (item.cadence === 'daily') return '今天已完成'

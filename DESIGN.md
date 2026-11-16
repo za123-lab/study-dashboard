@@ -70,7 +70,7 @@
 
 ## 8. 数据版本防护
 
-- 快照增加 `schemaVersion`，当前为 3。
+- 快照增加 `schemaVersion`，当前为 4。
 - 读到 `schemaVersion` 高于本页的数据：停止自动上传，提示「数据来自更新版本，请刷新页面」。
 - 上传前先读取云端最新 `rev`；不一致直接走冲突弹窗，不先写后覆盖。更新仍使用 `rev=eq.{baseRev}` 条件写作为第二道保险。
 - 旧快照缺少 `todos` / `details` / `schemaVersion` 时按空数组、空对象、当前版本读取。

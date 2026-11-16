@@ -41,6 +41,33 @@
   let pendingImport = null; // 已解析、待确认写入的 B 站课程
   let activeCheckinId = null; // 当前正在打卡的循环项 id
 
+  // 弹层统一开关：进场/退场都交给 CSS transition，退场结束再摘掉 display
+  // 这样关闭时遮罩和卡片先淡出，底下内容不会一帧内硬跳出来
+  const MODAL_OPEN_CLASS = "is-open";
+  const MODAL_EXIT_MS = 200; // 与 .modal-card / .modal-backdrop 的退场时长一致
+  const reduceMotionQuery = window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : null;
+
+  function openModal(node) {
+    if (!node) return;
+    clearTimeout(node._closeTimer);
+    node.hidden = false;
+    void node.offsetWidth; // 强制回流，让 opacity 从 0 起跳
+    node.classList.add(MODAL_OPEN_CLASS);
+  }
+
+  function closeModal(node, afterClose) {
+    if (!node || node.hidden || !node.classList.contains(MODAL_OPEN_CLASS)) return;
+    node.classList.remove(MODAL_OPEN_CLASS);
+    clearTimeout(node._closeTimer);
+    node._closeTimer = setTimeout(function () {
+      node.hidden = true;
+      // 表单重置放到退场之后，否则用户会看着内容先被清空再淡出
+      if (afterClose) afterClose();
+    }, reduceMotionQuery && reduceMotionQuery.matches ? 120 : MODAL_EXIT_MS);
+  }
+
   // 云同步运行状态（Supabase 配置、登录态、云端版本号都存 localStorage）
   let supaCfg = null; // { url, anonKey, auto }
   let supaSession = null; // { accessToken, refreshToken, expiresAt, userId, email }
@@ -1471,13 +1498,13 @@
     }
 
     dayReturnFocus = cell || null;
-    el.dayDetail.hidden = false;
+    openModal(el.dayDetail);
     el.dayClose.focus();
   }
 
   function closeDayDetail() {
-    if (el.dayDetail.hidden) return;
-    el.dayDetail.hidden = true;
+    if (!el.dayDetail.classList.contains(MODAL_OPEN_CLASS)) return;
+    closeModal(el.dayDetail);
     const back = dayReturnFocus;
     dayReturnFocus = null;
     if (back && document.contains(back)) back.focus();
@@ -1911,11 +1938,28 @@
     if (el.biliPanel) el.biliPanel.hidden = name !== "study";
     if (viewDirty[name]) renderView(name);
     if (prev !== name) {
+      // display:none→block 会重置 CSS animation，视图里的 .reveal / .course
+      // 每次切换都会重演整段 rise（还带 0.04~0.22s 交错），这就是“一闪一闪”。
+      // 入场只在首次加载播；切进来的视图先收掉内部动画，只做一次极短淡入。
+      settleReveals(views[name]);
+      settleReveals(el.biliPanel);
+      const active = views[name];
+      active.classList.remove("is-entering");
+      void active.offsetWidth;
+      active.classList.add("is-entering");
+
       const target = viewScroll[name] || 0;
       requestAnimationFrame(function () {
         window.scrollTo(0, target);
       });
     }
+  }
+
+  function settleReveals(root) {
+    if (!root) return;
+    root.querySelectorAll(".reveal, .course").forEach(function (node) {
+      node.style.animation = "none";
+    });
   }
 
   function bindTabKeys() {
@@ -1968,14 +2012,15 @@
     el.todoDueTime.value = todo ? todo.dueTime : "";
     el.todoNote.value = todo ? todo.note : "";
     el.todoLink.value = todo ? todo.link : "";
-    el.todoEditor.hidden = false;
+    openModal(el.todoEditor);
     el.todoTitle.focus();
   }
 
   function closeTodoEditor() {
-    el.todoEditor.hidden = true;
-    el.todoForm.reset();
-    el.todoId.value = "";
+    closeModal(el.todoEditor, function () {
+      el.todoForm.reset();
+      el.todoId.value = "";
+    });
   }
 
   function saveTodos(message) {
@@ -2195,14 +2240,15 @@
     el.checkinCourse.innerHTML = checkinCourseOptionsHtml(true);
     el.checkinCourse.value = item && item.courseId ? item.courseId : "";
     syncCheckinEditorFields();
-    el.checkinEditor.hidden = false;
+    openModal(el.checkinEditor);
     el.checkinName.focus();
   }
 
   function closeCheckinEditor() {
-    el.checkinEditor.hidden = true;
-    el.checkinForm.reset();
-    el.checkinId.value = "";
+    closeModal(el.checkinEditor, function () {
+      el.checkinForm.reset();
+      el.checkinId.value = "";
+    });
   }
 
   function saveCheckinFromEditor() {
@@ -2399,14 +2445,15 @@
       refreshCheckinLessons();
     }
 
-    el.checkinSheet.hidden = false;
+    openModal(el.checkinSheet);
     (item.kind === "video" ? el.checkinSheetProgress : el.checkinSheetNote).focus();
   }
 
   function closeCheckinSheet() {
-    el.checkinSheet.hidden = true;
-    el.checkinRunForm.reset();
-    activeCheckinId = null;
+    closeModal(el.checkinSheet, function () {
+      el.checkinRunForm.reset();
+      activeCheckinId = null;
+    });
   }
 
   function runCheckin() {
@@ -4083,13 +4130,13 @@
       state.courses.length +
       " 门课程。请选择保留哪一份，不会自动覆盖。";
     el.conflictTakeRemote.disabled = !(remote && remote.data);
-    el.syncConflict.hidden = false;
+    openModal(el.syncConflict);
     setSyncStatus("conflict", "冲突：云端与本机都有改动，等你选择");
     setLiveStatus("hold", "有未处理的冲突，自动拉取已暂停；请先在弹窗里选择保留哪份数据");
   }
 
   function closeConflict() {
-    el.syncConflict.hidden = true;
+    closeModal(el.syncConflict);
   }
 
   function handleSyncError(err, prefix) {
@@ -5260,16 +5307,20 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
-    if (!el.checkinSheet.hidden) {
+    if (el.checkinSheet.classList.contains(MODAL_OPEN_CLASS)) {
       closeCheckinSheet();
       return;
     }
-    if (!el.checkinEditor.hidden) {
+    if (el.checkinEditor.classList.contains(MODAL_OPEN_CLASS)) {
       closeCheckinEditor();
       return;
     }
-    if (!el.todoEditor.hidden) {
+    if (el.todoEditor.classList.contains(MODAL_OPEN_CLASS)) {
       closeTodoEditor();
+      return;
+    }
+    if (el.syncConflict.classList.contains(MODAL_OPEN_CLASS)) {
+      closeConflict();
       return;
     }
     closeDayDetail();

@@ -71,7 +71,7 @@ study-dashboard/
 ├──────────────────────────────────────────────────────────────┤
 │ 渲染层  renderView / renderAll                                │
 │         ├── 学习视图：renderToday / renderStats / renderCourses│
-│         │             / renderHeatmap / renderDemoNotice       │
+│         │             / renderHeatmap / renderCheckins         │
 │         ├── 待办视图：renderTodos                              │
 │         └── 日历视图：renderCalendar                           │
 ├──────────────────────────────────────────────────────────────┤
@@ -115,7 +115,7 @@ sanitize(data)
    ├── 判断 v1 / v2 结构
    ├── courses  ：v2 → cleanCourseV2，v1 → migrateCourseV1
    ├── activity ：日期键校验；v1 的「集数」×45 折算成分钟
-   ├── details / demoDetails → cleanDetails（同日同课时合并）
+   ├── details → cleanDetails（同日同课时合并）；旧示例字段剔除后恒为空
    ├── todos → cleanTodos（字段白名单 + 兜底默认值）
    ├── checkins → cleanCheckins（周期/类型兜底，清掉失效的课程引用）
    └── courseOpen / panelOpen → 只保留有效键
@@ -165,14 +165,14 @@ markSynced(row) → 记录 baseRev / syncedHash / lastSyncAt
 | 时间与日期工具 | `app.js` 顶部 | 分钟/时长格式化、日期键、周数、热力档位 | `fmtDur` `parseDuration` `dateKey` `todayKey` `addDays` `minuteLevel` |
 | 统计 | `app.js` 顶部 | 单节百分比、课程与总体加权进度 | `lessonPct` `courseStats` `overallStats` |
 | 存储与校验 | `app.js` 存储区 | 读入、迁移、白名单清洗、落盘 | `loadState` `saveState` `sanitize` `cleanCourseV2` `cleanDetails` `cleanTodos` `cleanCheckins` |
-| 学习视图 | `app.js` 渲染区 | 今日摘要、统计卡、课程卡片、热力图、示例提示 | `renderToday` `renderStats` `renderCourses` `renderHeatmap` |
+| 学习视图 | `app.js` 渲染区 | 今日摘要、统计卡、课程卡片、热力图、打卡列表 | `renderToday` `renderStats` `renderCourses` `renderHeatmap` `renderCheckins` |
 | 当日详情 | `app.js` 渲染区 | 热力图/日历点开某天，展示学习明细与当天待办 | `openDayDetail` `describeDetail` `todosOnDay` |
 | 待办 | `app.js` 待办区 | 清单渲染、筛选、计数、紧急度、增删改、批量导入 | `renderTodos` `sortedTodos` `parseTodoImport` `confirmTodoImport` |
 | 循环打卡 | `app.js` 打卡区 | 周任务/间隔任务判定、列表渲染、新建编辑、按课时进度打卡 | `checkinCycle` `renderCheckins` `openCheckinSheet` `runCheckin` |
 | 日历 | `app.js` 日历区 | 月历网格、手机列表、月度统计、日期点击 | `renderCalendar` `shiftMonth` `calUrgency` |
 | 视图切换 | `app.js` 视图区 | 惰性渲染、滚动位置恢复、键盘切换 | `setView` `bindTabKeys` |
 | 课程操作 | `app.js` 数据操作区 | 增删课程/课时、改时长、加 15 分、看完、改标题 | `addCourse` `removeCourse` `commitLessonField` `applyLessonAction` |
-| 数据清理 | `app.js` 数据操作区 | 清示例、重置打卡、清空全部 | `clearDemoData` `resetActivity` `emptyState` |
+| 数据清理 | `app.js` 数据操作区 | 重置打卡、清空全部 | `resetActivity` `emptyState` |
 | 导入导出 | `app.js` 尾部事件区 | JSON 备份下载 / 文件导入 | 事件内联逻辑 |
 | B 站导入 | `app.js` B 站区 | 提示词、JSON 校验、预览、新增/覆盖 | `parseBiliPayload` `showImportResult` `confirmBiliImport` |
 | 云同步 | `app.js` 云同步区 | 配置、登录、上传、拉取、冲突、状态提示 | 见 05 文档 |
@@ -206,7 +206,7 @@ markSynced(row) → 记录 baseRev / syncedHash / lastSyncAt
 
 | 决策 | 原因 | 代价 |
 | --- | --- | --- |
-| 整份 JSON 存一行，而不是拆课程表/课时表 | 渲染、导出、导入、示例数据共用同一对象；单行条件更新天然原子 | 以后要做跨用户统计或按课程检索，需要拆表或物化视图 |
+| 整份 JSON 存一行，而不是拆课程表/课时表 | 渲染、导出、导入共用同一对象；单行条件更新天然原子 | 以后要做跨用户统计或按课程检索，需要拆表或物化视图 |
 | 用 `rev` 而不是时间戳做乐观锁 | 版本号单调递增，比较不受设备时钟影响 | 必须在每次成功写入后同步本地 `baseRev` |
 | 冲突必须用户选择 | 学习记录不可再生，静默覆盖会丢数据 | 多设备同时改时多一步交互 |
 | 按视图惰性渲染 | 首屏只构建学习视图，减少无谓 DOM | 需要维护 `viewDirty` 标记 |

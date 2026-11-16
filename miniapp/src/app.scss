@@ -16,6 +16,14 @@ page {
   --u-week: #a08a2c;
   --u-far: #6f8398;
 
+  /* 液态玻璃：暖白半透明材质，与纸底同色系，不照搬 iOS 冷白 */
+  --glass: rgba(251, 248, 240, 0.62);
+  --glass-strong: rgba(251, 248, 240, 0.82);
+  --glass-edge: rgba(255, 255, 255, 0.72);
+  --glass-shadow: 0 12px 34px rgba(32, 52, 78, 0.1), 0 2px 8px rgba(32, 52, 78, 0.05);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
   min-height: 100%;
   color: var(--ink);
   font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
@@ -40,7 +48,7 @@ button {
 }
 
 .page {
-  padding: 18px 18px 40px;
+  padding: 18px 18px calc(78px + env(safe-area-inset-bottom));
 }
 
 /* 报头 */
@@ -104,12 +112,45 @@ button {
 
 /* 面板 */
 .panel {
-  background: var(--paper-2);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
+  position: relative;
+  /* 静态表面：底下是纯纸色、无内容滚过，不加 backdrop-filter（它在 WKWebView
+     首帧会产生异步合成的空层，导致面板区域闪白）。玻璃感按 Apple 液态玻璃标准
+     用三层合成：镜面斜高光（折光）+ 半透明暖白渐变 + 边缘透光（亮顶/暗底）。 */
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 255, 255, 0.42) 0%,
+      rgba(255, 255, 255, 0.1) 30%,
+      rgba(255, 255, 255, 0) 48%
+    ),
+    linear-gradient(
+      155deg,
+      rgba(255, 255, 255, 0.66) 0%,
+      var(--glass) 48%,
+      rgba(246, 241, 229, 0.52) 100%
+    );
+  border: 1px solid var(--glass-edge);
+  border-radius: 14px;
   padding: 16px;
   margin-bottom: 14px;
-  box-shadow: 0 1px 2px rgba(32, 52, 78, 0.06);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge),
+    inset 0 -1px 0 rgba(32, 52, 78, 0.06),
+    inset 0 0 0 1px rgba(32, 52, 78, 0.05);
+  /* 页面切换入场：玻璃"显影"——从 30% 透明度轻微上浮落定。
+     只在 tab 页首次挂载播放（切走不卸载、回来不重播）；页面背景、
+     标题、底栏始终稳定，永不整页空白（区别于之前引发闪白的整页淡入）。 */
+  animation: panel-in 260ms var(--ease-out) both;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0.3;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .panel-head {
@@ -159,9 +200,9 @@ button {
   font-size: 13px;
   line-height: 1.4;
   color: var(--ink);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.4);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 10px;
 }
 
 .btn::after {
@@ -172,6 +213,7 @@ button {
   color: var(--paper-2);
   background: var(--ink);
   border-color: var(--ink);
+  box-shadow: 0 4px 14px rgba(32, 52, 78, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .btn-small {
@@ -277,12 +319,12 @@ button {
 /* 优先级 / 类别小标签 */
 .tag {
   display: inline-block;
-  padding: 1px 5px;
+  padding: 1px 6px;
   margin-right: 5px;
   font-size: 10px;
   line-height: 1.5;
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 5px;
   color: var(--ink-soft);
 }
 
@@ -294,10 +336,12 @@ button {
 /* 分段控制器 */
 .seg {
   display: flex;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 11px;
   overflow: hidden;
   margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(32, 52, 78, 0.04);
 }
 
 .seg-item {
@@ -306,11 +350,13 @@ button {
   font-size: 12.5px;
   text-align: center;
   color: var(--ink-soft);
+  transition: color 180ms var(--ease-out), background-color 180ms var(--ease-out);
 }
 
 .seg-item-on {
   color: var(--paper-2);
   background: var(--ink);
+  box-shadow: 0 2px 8px rgba(32, 52, 78, 0.16);
 }
 
 /* ---------- 宽屏：折叠屏展开态 / 平板 / 横屏 ----------
@@ -324,7 +370,7 @@ button {
   .page {
     max-width: 1040PX;
     margin: 0 auto;
-    padding: 20PX 24PX 36PX;
+    padding: 20PX 24PX calc(84PX + env(safe-area-inset-bottom));
   }
 
   .masthead {
@@ -359,6 +405,7 @@ button {
 
   .panel {
     padding: 14PX 16PX;
+    border-radius: 16PX;
   }
 
   .panel-head {
@@ -446,6 +493,118 @@ button {
 
   .cols .panel {
     height: 100%;
+  }
+}
+
+/* ---------- 按压反馈：只动 transform，140ms 内结束 ---------- */
+.btn,
+.chip,
+.todo-add,
+.imp-btn,
+.cal-nav,
+.btn-main,
+.btn-ghost,
+.stepper-btn,
+.sheet-btn {
+  transition: transform 140ms var(--ease-out), box-shadow 140ms ease;
+}
+
+.btn:active,
+.chip:active,
+.todo-add:active,
+.imp-btn:active,
+.cal-nav:active,
+.btn-main:active,
+.btn-ghost:active,
+.stepper-btn:active,
+.sheet-btn:active {
+  transform: scale(0.97);
+}
+
+@keyframes glass-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes glass-mask {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 减少动效：去掉位移，只保留短淡入；反馈改成透明度 */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none !important;
+  }
+  .btn:active,
+  .chip:active,
+  .todo-add:active,
+  .imp-btn:active,
+  .cal-nav:active,
+  .btn-main:active,
+  .btn-ghost:active,
+  .stepper-btn:active,
+  .sheet-btn:active {
+    transform: none;
+    opacity: 0.82;
+  }
+
+  .day-card,
+  .sheet-card {
+    animation-name: glass-fade !important;
+    animation-duration: 180ms !important;
+  }
+
+  .day-mask,
+  .sheet-mask {
+    animation-name: glass-mask !important;
+    animation-duration: 140ms !important;
+  }
+
+  /* 退场：位移取消，只留淡出；时长与入场降级对齐 */
+  .card-closing {
+    animation-name: glass-fade !important;
+    animation-direction: reverse !important;
+    animation-duration: 140ms !important;
+  }
+
+  .mask-closing {
+    animation-duration: 140ms !important;
+  }
+
+  /* 操作反馈类：减少动效下全部关闭，只保留颜色/状态本身的变化 */
+  .todo-check {
+    animation: none !important;
+  }
+
+  .todo-box,
+  .todo-title,
+  .seg-item,
+  .bar-fill,
+  .cell {
+    transition: none !important;
+  }
+}
+
+/* 减少透明：玻璃调实，去掉模糊 */
+@media (prefers-reduced-transparency: reduce) {
+  .panel,
+  .day-card,
+  .sheet-card,
+  .seg,
+  .mini-cal,
+  .btn {
+    background: var(--paper-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

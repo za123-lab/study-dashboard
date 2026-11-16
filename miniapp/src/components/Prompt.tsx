@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Input, Text, View } from '@tarojs/components'
+import { pushOverlay, popOverlay } from '../data/overlay'
+import { useDismiss } from '../data/motion'
 import './index.scss'
 
 interface InputRequest {
@@ -91,20 +93,45 @@ export function PromptHost() {
     }
   }, [])
 
-  function close(result: string | null) {
+  // 有请求时才算弹层出现，避免常驻宿主把底栏一直隐藏
+  useEffect(function () {
+    if (!req) return
+    pushOverlay()
+    return function () {
+      popOverlay()
+    }
+  }, [!!req])
+
+  // 关面板时先播退场，动画结束再真正 resolve（否则弹窗会瞬间消失）
+  const resultRef = useRef<string | null>(null)
+  const { closing, dismiss, reset } = useDismiss(function () {
     const cur = pending
     if (!cur) return
     pending = null
     publish()
+    const result = resultRef.current
     if (cur.kind === 'input') cur.resolve(result)
     else cur.resolve(result !== null)
+  })
+
+  // 新请求进来时清掉上次残留的退场态，保证入场动画能重播
+  useEffect(function () {
+    if (req) reset()
+  }, [!!req])
+
+  function close(result: string | null) {
+    resultRef.current = result
+    dismiss()
   }
 
   if (!req) return null
 
+  const maskCls = 'sheet-mask' + (closing ? ' mask-closing' : '')
+  const cardCls = 'sheet-card' + (closing ? ' card-closing' : '')
+
   return (
-    <View className='sheet-mask' onClick={function () { close(null) }}>
-      <View className='sheet-card' onClick={function (e) { e.stopPropagation() }}>
+    <View className={maskCls} onClick={function () { close(null) }}>
+      <View className={cardCls} onClick={function (e) { e.stopPropagation() }}>
         <View className='sheet-head'>
           <View className='sheet-head-main'>
             <Text className='sheet-kicker mono'>{req.kind === 'input' ? '写一笔 · NOTE' : '确认 · CONFIRM'}</Text>

@@ -515,12 +515,12 @@ input:focus {
   cursor: pointer;
   border-radius: var(--radius);
   border: 1px solid transparent;
-  transition: transform 0.15s ease, box-shadow 0.2s ease,
+  transition: transform 160ms ease-out, box-shadow 0.2s ease,
     background 0.2s ease, color 0.2s ease;
 }
 
 .btn:active {
-  transform: translateY(1px);
+  transform: scale(0.97);
 }
 
 .btn:focus-visible {
@@ -665,7 +665,8 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.15s ease, border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .icon-btn:hover {
@@ -1433,7 +1434,7 @@ input:focus {
 
 .fold-panel.is-open .fold-chev {
   transform: rotate(-135deg);
-  transition: transform 200ms ease-in;
+  transition: transform 180ms ease-out;
 }
 
 /* 0fr → 1fr 让高度参与过渡，不用 display:none 硬切 */
@@ -1441,7 +1442,7 @@ input:focus {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition: grid-template-rows 200ms ease-in, opacity 160ms ease-in;
+  transition: grid-template-rows 180ms ease-out, opacity 140ms ease-out;
 }
 
 .fold-panel.is-open > .fold-body {
@@ -1575,12 +1576,23 @@ input:focus {
   display: grid;
   place-items: center;
   padding: 20px;
+  pointer-events: none; /* 退场期间不拦截点击，避免底下内容被“闷住” */
+}
+
+.modal.is-open {
+  pointer-events: auto;
 }
 
 .modal-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(32, 52, 78, 0.45);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.modal.is-open .modal-backdrop {
+  opacity: 1;
 }
 
 .modal-card {
@@ -1591,7 +1603,16 @@ input:focus {
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
-  animation: rise 0.25s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  /* 不用 scale(0)：现实中没有东西凭空出现；缩小 + 淡入且随时可中断 */
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+  transition: opacity 200ms ease-out,
+    transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.modal.is-open .modal-card {
+  opacity: 1;
+  transform: none;
 }
 
 .modal-card h3 {
@@ -1983,6 +2004,22 @@ input:focus {
 
 .course {
   animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* 视图切换：内部 .reveal 已被 JS 收掉，这里只做一次短促淡入 */
+.view.is-entering {
+  animation: viewIn 160ms ease-out both;
+}
+
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- 响应式 ---------- */
@@ -3747,8 +3784,14 @@ input:focus {
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
+    animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    /* 更轻柔，而不是清零：保留淡入淡出，去掉位移与缩放 */
+    transition-property: opacity, color, border-color, background-color !important;
+    transition-duration: 120ms !important;
+  }
+  .modal-card,
+  .view.is-entering {
+    transform: none !important;
   }
 }

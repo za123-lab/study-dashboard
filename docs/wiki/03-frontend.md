@@ -44,7 +44,7 @@
 | 常量 | 值 | 含义 |
 | --- | --- | --- |
 | `APP_NAME` | `"学业工作台"` | 站点名唯一出处：标题、页脚、导出文件名 |
-| `SCHEMA_VERSION` | `3` | 数据结构版本，高于本版本的快照不自动上传 |
+| `SCHEMA_VERSION` | `4` | 数据结构版本，高于本版本的快照不自动上传 |
 | `STORE_KEY` | `"study-log-v1"` | 主数据键，沿用旧名以便原地迁移 |
 | `SUPA_CFG_KEY` | `"study-supabase-v1"` | Supabase 连接配置 |
 | `SUPA_SESSION_KEY` | `"study-supabase-session-v1"` | 登录态 token |
@@ -58,7 +58,7 @@
 
 另有三个业务常量：
 
-- `TODO_CATS = { study: "学业", contest: "竞赛", event: "赛事", other: "其他" }`
+- `TODO_CATS = { study: "学业课程", contest: "学科竞赛", event: "文体活动", other: "其他" }`
 - `TODO_PRI = ["P0", "P1", "P2"]`
 - `URGENCY_LABEL` / `URGENCY_RANK`：`overdue(0) < soon(1) < week(2) < far(3)`
 
@@ -154,7 +154,7 @@
 | `lessonRowHtml(course, lesson, idx)` | 课时行：标题（可点击编辑）、总时长 / 已看输入框、进度条、百分比、`+15 分` / `看完` / `删除` / B 站链接 |
 | `renderHeatmap()` | 按周生成 7×N 的按钮网格；未来日期禁用；有视频、明细、完成待办或打卡的日期都可打开，`has-stats` 加细红框 |
 | `dayStats(key)` | 单日量化：`{ done, checkins }`；按 `todos.doneAt` 与 `checkins.logs[].date` 统计 |
-| `hasDayDetails(key)` | 真实明细或示例明细是否存在 |
+| `hasDayDetails(key)` | 当天是否有明细记录 |
 | `dayLabel(key)` | `"2026 年 11 月 7 日 · 星期五"` |
 | `describeDetail(entry)` | 明细 → 课程名 / 课时名 / 当前进度（含课程或课时已删除的降级文案） |
 | `openDayDetail(key, cell, forceOpen)` | 打开当日弹层：视频时长 + 完成待办/打卡次数 + 明细 + 当天待办 + 当天打卡；记录返回焦点 |
@@ -221,8 +221,6 @@
 | `findCourse(id)` / `findLesson(course, id)` | 线性查找 |
 | `adjustActivity(delta)` | 今日 `activity` 增减；减到 0 时删除该日键 |
 | `recordDetail(course, lesson, delta)` | 只记正增量；同日同课时合并；写入 `state.details` |
-| `subtractDemoActivity()` | 从 `activity` 扣掉 `demoActivity`，并清空示例明细 |
-| `clearDemoData()` | 删除示例课程与示例打卡（`confirm` 后执行） |
 | `resetActivity()` | 只清打卡与明细，保留课程与已看时长 |
 | `addCourse(name, count, defaultMin)` | 按节数批量生成课时 |
 | `removeCourse(id)` | 删除课程及其展开状态 |
@@ -249,15 +247,13 @@
 | `clearTodoImport()` | 清空粘贴框、预览与错误 |
 | `confirmTodoImport()` | 把 `items` 写入 `state.todos`，提示新增与跳过数量 |
 
-`TODO_IMPORT_CAT_MAP` 同时接受内部 key 与中文标签（学业 / 竞赛 / 赛事 / 其他），避免 AI 输出中文类别时被误判非法。
+`TODO_IMPORT_CAT_MAP` 同时接受内部 key 与中文标签（学业课程 / 学科竞赛 / 文体活动 / 其他，以及简称 学业 / 竞赛 / 赛事），避免 AI 输出中文类别时被误判非法。
 
-### 5.12 示例、头部与提示
+### 5.12 头部与提示
 
 | 函数 | 行为 |
 | --- | --- |
 | `renderStreak()` | 连续打卡天数 |
-| `demoSummary()` | 示例课程数、示例打卡天数与分钟数 |
-| `renderDemoNotice()` | 示例数据提示条显隐与文案 |
 | `renderHeatNote()` | 有打卡但已无课程时，提示「记录已失去来源」并提供重置入口 |
 | `toast(msg)` | 2.4 秒轻提示，重复调用会重置计时 |
 
@@ -371,10 +367,9 @@ const viewScroll = { study: 0, todo: 0, calendar: 0 };
 | `#supaAuto` | `change` | 开关自动同步（关闭时停轮询与实时） |
 | `#supaPushBtn` `#supaPullBtn` `#supaLogoutBtn` | `click` | 立即上传 / 立即拉取 / 退出登录 |
 | `#conflictTakeRemote` `#conflictPushLocal` `#conflictCancel` | `click` | 冲突三选一 |
-| `#seedBtn` | `click` | 填入示例课程与示例打卡 |
 | `#exportBtn` | `click` | 导出 JSON |
 | `#importBtn` `#importFile` | `click` / `change` | 选择并导入 JSON 备份 |
-| `#clearBtn` `#resetActivityBtn` `#heatResetBtn` `#demoClearBtn` | `click` | 清空 / 重置打卡 / 清除示例 |
+| `#clearBtn` `#resetActivityBtn` `#heatResetBtn` | `click` | 清空 / 重置打卡 |
 | `window` | `online` / `offline` | 恢复或暂停同步、重连实时 |
 | `document` | `visibilitychange` | 隐藏时停轮询；可见时 `onForeground` |
 | `window` | `focus` | `onForeground` |

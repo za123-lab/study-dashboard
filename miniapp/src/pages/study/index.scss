@@ -12,11 +12,14 @@
 }
 
 .cell {
+  position: relative;
   width: 100%;
   height: 0;
   padding-bottom: 100%;
   border-radius: 1.5px;
   background: rgba(32, 52, 78, 0.07);
+  /* 只在等级真正变化时过渡颜色（打卡反馈）；滚动时颜色不变，不会闪 */
+  transition: background-color 300ms var(--ease-out);
 }
 
 .cell-l1 {
@@ -35,16 +38,41 @@
   background: #9e3128;
 }
 
+/* 当天有待办 / 打卡：细红内框（与视频色块叠加时用右下圆点补条数） */
 .cell-stats {
-  box-shadow: inset 0 0 0 1px rgba(192, 69, 58, 0.55);
+  box-shadow: inset 0 0 0 1px var(--red);
+}
+
+/* 有视频且另有待办 / 打卡：右下角圆点，按条数由浅到深 */
+.cell-stat-dot {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--paper-2);
+}
+
+.cell-stat-d1 {
+  background: #eda498;
+}
+
+.cell-stat-d2 {
+  background: var(--red);
+}
+
+.cell-stat-d3 {
+  background: #7f1f17;
 }
 
 .cell-future {
   opacity: 0.3;
 }
 
+/* 今天用真实边框画黑框，不再用内阴影盖掉 cell-stats 的红框 */
 .cell-today {
-  box-shadow: inset 0 0 0 1px var(--ink);
+  border: 1px solid var(--ink);
 }
 
 .legend {
@@ -72,8 +100,15 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 10px 6px;
+  margin: 0 -6px;
+  border-radius: 9px;
   border-bottom: 1px solid rgba(32, 52, 78, 0.07);
+  transition: background 140ms var(--ease-out);
+}
+
+.checkin-row:active {
+  background: rgba(32, 52, 78, 0.05);
 }
 
 .checkin-main {

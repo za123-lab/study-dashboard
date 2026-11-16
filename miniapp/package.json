@@ -14,6 +14,7 @@
     "prepare": "husky",
     "new": "taro new",
     "build:weapp": "taro build --type weapp",
+    "preview": "node scripts/preview.js",
     "build:swan": "taro build --type swan",
     "build:alipay": "taro build --type alipay",
     "build:tt": "taro build --type tt",

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { View, Text } from '@tarojs/components'
-import { useDidShow } from '@tarojs/taro'
+import Taro, { useDidShow } from '@tarojs/taro'
 import DayDetail from '../../components/DayDetail'
 import { dateKey, todayKey } from '../../data/date'
 import { calUrgency, dayStats, getState, reload, todosOnDay } from '../../data/store'
@@ -51,6 +51,8 @@ export default function CalendarPage() {
 
   useDidShow(
     useCallback(function () {
+      Taro.eventCenter.trigger('custom-tabbar:select', 2)
+      Taro.setNavigationBarTitle({ title: '日历' })
       reload()
       autoSync().then(function () {
         reload()
@@ -123,8 +125,11 @@ export default function CalendarPage() {
 
         <View className='cal-grid'>
           {cells.map(function (c) {
+            // 有待办、完成待办或打卡记录的日期用红框圈出来
+            const hasMarks = c.todos.length > 0 || c.done > 0 || c.checkins > 0
             let innerCls = 'cal-inner'
             if (!c.inMonth) innerCls += ' cal-inner-out'
+            if (hasMarks) innerCls += ' cal-inner-marked'
             if (c.key === today) innerCls += ' cal-inner-today'
             return (
               <View className='cal-cell' key={c.key} onClick={function () { onCell(c) }}>
@@ -155,6 +160,13 @@ export default function CalendarPage() {
               </View>
             )
           })}
+        </View>
+
+        <View className='cal-legend'>
+          <View className='cal-legend-box' />
+          <Text>红框＝当天有待办或打卡</Text>
+          <View className='cal-legend-box cal-legend-box-today' />
+          <Text>黑框＝今天</Text>
         </View>
 
         <View className='cal-summary'>

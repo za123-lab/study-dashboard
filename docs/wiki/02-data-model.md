@@ -7,7 +7,7 @@
 ```jsonc
 {
   "v": 2,                        // 内部结构代际：v1 是「集数制」，v2 是「分钟制」
-  "schemaVersion": 3,            // 快照版本号，用于跨页面/跨设备防护
+  "schemaVersion": 4,            // 快照版本号，用于跨页面/跨设备防护（当前为 4）
   "courses": [
     {
       "id": "lq3k9x2ab",         // 字符串 ID，makeId() 生成
@@ -22,7 +22,6 @@
           "url": "https://www.bilibili.com/video/BV...?p=1" // 可选，仅站内链接
         }
       ],
-      "demo": true,              // 可选：示例课程标记
       "source": "bili",          // 可选：来源，仅 "bili" 会被识别为 B 站课程
       "bvid": "BV1xx411c7mD",    // 可选：BV 号（source=bili 时保留）
       "videoTitle": "完整视频标题" // 可选：B 站原视频标题，≤ 200 字符
@@ -31,16 +30,10 @@
   "activity": {                  // 每天累计观看分钟数（统计卡与热力图只认它）
     "2026-11-07": 43
   },
-  "demoActivity": {              // 示例打卡单独记一份，便于整份清除
-    "2026-11-01": 45
-  },
   "details": {                   // 每日明细，与 activity 并存
     "2026-11-07": [
       { "cid": "课程ID", "lid": "课时ID", "idx": 3, "min": 43, "at": 1762528800000 }
     ]
-  },
-  "demoDetails": {               // 示例明细
-    "2026-11-01": []
   },
   "todos": [
     {
@@ -84,8 +77,8 @@
 | `schemaVersion` | number | 固定输出当前 `SCHEMA_VERSION`（4） | `sanitize` |
 | `courses` | array | 只保留 `name` 非空字符串的项 | `sanitize` |
 | `activity` | object | 键必须是 `YYYY-MM-DD`，值 0–99999，只保留 > 0 | `sanitize` |
-| `demoActivity` | object | 同上，但只记录示例部分 | `sanitize` |
-| `details` / `demoDetails` | object | 键 `YYYY-MM-DD`，值按 `cleanDetails` 合并 | `cleanDetails` |
+| `details` | object | 键 `YYYY-MM-DD`，值按 `cleanDetails` 合并 | `cleanDetails` |
+| `demoActivity` / `demoDetails` | object | 遗留字段，输出恒为空对象；读入旧数据时用于剔除示例分钟 | `sanitize` |
 | `todos` | array | 按 `cleanTodos` 逐条白名单校验 | `cleanTodos` |
 | `checkins` | array | 按 `cleanCheckins` 校验；课程被删后 `courseId` 置空 | `cleanCheckins` |
 | `courseOpen` | object | 只保留仍存在课程且值为 `true` 的键 | `sanitize` |
@@ -182,8 +175,8 @@ JSON.stringify(state) → localStorage.setItem
 4. 课程：有 `lessons` 数组走 `cleanCourseV2`，否则走 `migrateCourseV1`。
 5. `courseOpen`：只保留仍存在课程的键；`panelOpen`：只认 `sync` / `bili`。
 6. `activity`：日期键校验；v1 数据把「集数」乘以 `DEFAULT_LESSON_MIN = 45`。
-7. `demoActivity`：同上但不做 v1 折算。
-8. `details` / `demoDetails`：`cleanDetails`。
+7. 旧 `demoActivity`：把这部分分钟从 `activity` 中扣回，输出时字段恒为 `{}`。
+8. `details`：`cleanDetails`；`demoDetails`：旧示例明细直接丢弃，输出恒为 `{}`。
 9. `todos`：`cleanTodos`。
 10. `checkins`：`cleanCheckins`，随后把指向已删除课程的 `courseId` 置空。
 11. 输出统一 v2 结构。
@@ -230,9 +223,9 @@ doneSet = Set(done 数组中的整数)
   "exportedAt": "2026-11-09T...Z",
   "courses": [...],
   "activity": {...},
-  "demoActivity": {...},
+  "demoActivity": {},            // 遗留字段，恒为空对象
   "details": {...},
-  "demoDetails": {...},
+  "demoDetails": {},             // 遗留字段，恒为空对象
   "todos": [...],
   "checkins": [...],
   "courseOpen": {...},
@@ -249,26 +242,17 @@ doneSet = Set(done 数组中的整数)
 
 `exportedAt` 只用于人查看，不参与任何逻辑。导入同样接受只含 `courses` 的旧文件，缺失字段按空值兜底。
 
-## 6. 示例数据机制
+## 6. 遗留的示例数据字段（功能已下线）
 
-示例数据与真实数据在结构上完全同构，但通过三个标记隔离：
+「填入示例课程 / 清除示例数据」入口已下线，相关的 `seedBtn`、`demoClearBtn`、`clearDemoData()`、`subtractDemoActivity()` 等函数也已从代码中删除。数据结构里仍保留三个**遗留字段**，只为兼容旧快照、读入时把历史示例数据剔除干净：
 
-| 标记 | 作用 |
+| 遗留字段 | 现状 |
 | --- | --- |
-| `course.demo = true` | 课程卡片显示「示例」标签 |
-| `state.demoActivity` | 示例打卡单独累计，清除时从这里扣回 |
-| `state.demoDetails` | 示例明细单独存放，清除时整份删除 |
+| `course.demo` | 读入时 `demo === true` 的课程直接丢弃，不再写回 |
+| `state.demoActivity` | 把这部分分钟从 `activity` 中扣回后，输出恒为 `{}` |
+| `state.demoDetails` | 旧示例明细直接丢弃，输出恒为 `{}` |
 
-`seedBtn`（填入示例课程）会：
-
-1. 先移除上一次的示例课程，保留用户自己的课程；
-2. 新增「C 语言程序设计」（86 节，第 13 节为 83 分钟只看 43 分钟的样例）与「大学计算机基础」（24 节 × 30 分钟）；
-3. `subtractDemoActivity()` 先扣掉旧示例打卡，防止重复叠加；
-4. 写入 6 天示例打卡（45/90/20/60/30/120 分钟）与逐条示例明细。
-
-`demoClearBtn`（清除示例数据）只删 `demo === true` 的课程、`demoActivity` 与 `demoDetails`，并把这部分分钟数从 `activity` 中扣回；用户自己登记的数据不受影响。
-
-`heatResetBtn` / `resetActivityBtn`（重置打卡记录）则清空 `activity / demoActivity / details / demoDetails`，但保留课程与每节 `watchedMin`。
+这些字段仍会出现在导出 JSON 和云同步快照里，但值恒为空；不要在界面或业务逻辑里重新依赖它们。新增功能应直接使用 `activity` / `details`。
 
 ## 7. 版本防护（`schemaVersion`）
 
@@ -283,8 +267,7 @@ doneSet = Set(done 数组中的整数)
 
 | 操作 | 入口 | 清除范围 | 保留 |
 | --- | --- | --- | --- |
-| 清除示例数据 | 示例提示条 | 示例课程、示例打卡、示例明细 | 真实课程 / 打卡 / 待办 |
-| 重置打卡记录 | 页脚 / 热力图提示 | `activity`、`demoActivity`、`details`、`demoDetails` | 课程与每节已看时长 |
+| 重置打卡记录 | 页脚 / 热力图提示 | `activity`、`details`（两个遗留字段一并置空） | 课程与每节已看时长 |
 | 清空数据 | 页脚 | 全部（回到 `emptyState()`） | 无（仅保留界面展开状态默认值） |
 
-三者都不可撤销，且都会先 `confirm()`；清空后重新 `saveState()` 并 `renderAll()`，登录状态下会触发一次云同步（即云端也会被清空，因此界面文案明确提示「建议先导出备份」）。
+两者都不可撤销，且都会先 `confirm()`；清空后重新 `saveState()` 并 `renderAll()`，登录状态下会触发一次云同步（即云端也会被清空，因此界面文案明确提示「建议先导出备份」）。

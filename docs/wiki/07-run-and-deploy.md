@@ -30,7 +30,6 @@ file:///D:/Users/22608/Desktop/CODE/study-dashboard/index.html
 | 热力图、日历、当日详情 | ✅ | ✅ |
 | 导出 / 导入 JSON | ✅ | ✅ |
 | 复制提示词 | ✅（自动降级 `execCommand`） | ✅（优先 Clipboard API） |
-| 示例数据 | ✅ | ✅ |
 | Supabase 云同步 | ⚠️ 可能受浏览器安全策略影响 | ✅ 推荐 |
 
 `file://` 下 `localStorage` 按文件路径隔离，移动文件位置会「丢数据」（其实是换了存储域）。长期使用建议固定目录或改用 HTTP 服务。
@@ -57,10 +56,9 @@ VS Code 也可以直接用 Live Server 插件。
 
 1. 页头「学业工作台」+ 当天日期 + 连续打卡印章；
 2. 三个页签「学习 / 待办 / 日历」；
-3. 空的今日卡、0% 圆环、空热力图、空课程列表；
-4. 空状态里的「填入示例课程」按钮。
+3. 空的今日卡、0% 圆环、空热力图、空课程列表。
 
-点「填入示例课程」可以立刻看到完整效果：两门示例课、6 天示例打卡、补课明细。示例数据可一键清除，不污染真实记录。
+第一次使用请直接在「学习」视图登记课程、在「待办」视图添加事项；旧版本里的「填入示例课程」入口已下线。
 
 ## 3. 部署到 GitHub Pages
 
@@ -74,13 +72,30 @@ VS Code 也可以直接用 Live Server 插件。
 4. 每次发版修改 `index.html` 里两处缓存版本号：
 
 ```html
-<link rel="stylesheet" href="style.css?v=20261109-1">
-<script src="app.js?v=20261109-1"></script>
+<link rel="stylesheet" href="style.css?v=20261116-1">
+<script src="app.js?v=20261116-1"></script>
 ```
 
 两处必须一致，否则用户可能拿到「新 HTML + 旧 JS」或「旧 CSS + 新 JS」。
 
 其他静态托管同理：只需能通过 HTTP 提供这三个文件，且默认首页为 `index.html`。云同步要求站点为 `https`（`localhost` 例外）。
+
+### 3.1 版本控制（强制）
+
+改完代码和文档后**及时提交并推送**，不要攒一大批未提交改动：
+
+```bash
+git status                       # 先看改了什么，确认无密钥/私钥/本机私有配置
+git add <改动的文件>             # 或 git add -A（先确认过 status）
+git commit -m 'fix: 简述本次改动'
+git push origin main             # 网页版 push main 即由 GitHub Pages 自动发布
+```
+
+- 一个逻辑改动一个提交，信息用 `feat:` / `fix:` / `docs:` / `chore:` 前缀开头。
+- **代码与文档一起提交**：改了界面/数据结构/发布流程，就同步改 `docs/` 下对应文档，避免文档停在旧状态误导后续维护。
+- 不可提交：`*.key` 私钥、`project.private.config.json`、`.screenshots/` 二维码、任何含 token 的配置；它们已在 `.gitignore` 中，密钥只走环境变量。
+- 本机若遇到 `github.com` 解析到不可达 IP（`Connection was reset`），用：
+  `git -c http.curloptResolve=github.com:443:140.82.112.3 push origin main`。
 
 ## 4. 接入 Supabase（可选）
 
@@ -137,10 +152,8 @@ wrangler deploy
 | --- | --- |
 | 本地打开 | 双击 `index.html` |
 | 本地服务 | `python -m http.server 8765` |
-| 查看示例 | 空状态「填入示例课程」 |
 | 备份 | 页脚「导出数据」→ `<站点名>-YYYY-MM-DD.json` |
 | 恢复 | 页脚「导入数据」→ 选择 JSON → 确认覆盖 |
-| 清示例 | 示例提示条「清除示例数据」 |
 | 重置打卡 | 页脚 / 热力图提示「重置打卡记录」 |
 | 清空全部 | 页脚「清空数据」（不可撤销） |
 | 云同步配置 | 页面最下方「设置 · 云同步」 |
@@ -205,9 +218,9 @@ wrangler deploy
 页脚「导出数据」生成：
 
 ```json
-{ "v": 2, "schemaVersion": 3, "exportedAt": "...", "courses": [], "activity": {},
+{ "v": 2, "schemaVersion": 4, "exportedAt": "...", "courses": [], "activity": {},
   "demoActivity": {}, "details": {}, "demoDetails": {}, "todos": [],
-  "courseOpen": {}, "panelOpen": {} }
+  "checkins": [], "courseOpen": {}, "panelOpen": {} }
 ```
 
 文件名由 `APP_NAME` + 当天日期组成。备份**不含** Supabase 配置与 token。
@@ -231,7 +244,7 @@ wrangler deploy
 3. `snapshot` 带出新字段；
 4. 导出逻辑与 `supabase/schema.sql` 的体积约束同步检查；
 5. 旧页面读到新版本会自动停止上传（不会写丢字段），但用户需要刷新才能继续同步；
-6. 发版前先导出备份，并用「示例数据 + 导入旧文件」各跑一遍。
+6. 发版前先导出备份，并用「导入旧版本快照」跑一遍，确认迁移与清洗正常。
 
 ## 10. 运行时行为参数
 

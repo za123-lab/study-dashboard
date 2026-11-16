@@ -10,6 +10,7 @@ import {
   addCheckinLog,
   checkinCadenceText,
   checkinCanRun,
+  checkinDoneToday,
   checkinStatusText,
   commit,
   dayStats,
@@ -94,6 +95,10 @@ export default function StudyPage() {
 
   useDidShow(
     useCallback(function () {
+      Taro.eventCenter.trigger('custom-tabbar:select', 0)
+      // 兜底：自定义 tabBar 下 switchTab 的原生导航标题偶发空白（微信已知时序问题），
+      // 页面 json 里的 navigationBarTitleText 保留，每次显示时再显式设置一次
+      Taro.setNavigationBarTitle({ title: '今日一页' })
       reload()
       autoSync().then(function () {
         reload()
@@ -290,6 +295,7 @@ export default function StudyPage() {
         )}
         {state.checkins.map(function (item) {
           const can = checkinCanRun(item)
+          const recordedToday = item.cadence === 'daily' && checkinDoneToday(item)
           return (
             <View className='checkin-row' key={item.id}>
               <View className='checkin-main'>
@@ -303,7 +309,7 @@ export default function StudyPage() {
                 className={'btn btn-small' + (can ? ' btn-primary' : ' btn-disabled')}
                 onClick={function () { onRunCheckin(item) }}
               >
-                {can ? '打卡' : '已完成'}
+                {can ? (recordedToday ? '再记' : '打卡') : '已完成'}
               </Text>
               <Text className='link-btn' onClick={function () { onDeleteCheckin(item.id) }}>删除</Text>
             </View>
@@ -328,14 +334,20 @@ export default function StudyPage() {
                   let cls = 'cell'
                   if (cell.level > 0) cls += ' cell-l' + cell.level
                   if (cell.future) cls += ' cell-future'
-                  if (cell.hasStats && cell.level === 0) cls += ' cell-stats'
+                  // 当天有待办 / 打卡就画细红框；有视频时再叠加右下角圆点表示条数
+                  if (cell.hasStats && !cell.future) cls += ' cell-stats'
                   if (cell.today) cls += ' cell-today'
+                  const showStatDot = cell.hasStats && cell.level > 0 && !cell.future
                   return (
                     <View
                       key={cell.key}
                       className={cls}
                       onClick={function () { onTapCell(cell) }}
-                    />
+                    >
+                      {showStatDot && (
+                        <View className={'cell-stat-dot cell-stat-d' + cell.statLevel} />
+                      )}
+                    </View>
                   )
                 })}
               </View>
@@ -353,7 +365,7 @@ export default function StudyPage() {
           <Text>多</Text>
         </View>
         <View className='legend' style='margin-top:4px'>
-          <Text>细红框＝只有待办或打卡；有视频时右下角圆点越深，待办与打卡条数越多</Text>
+          <Text>红框＝当天有待办或打卡 · 黑框＝今天 · 有视频时右下角圆点越深，待办与打卡条数越多</Text>
         </View>
       </View>
 

@@ -47,6 +47,8 @@ export default function TodoPage() {
 
   useDidShow(
     useCallback(function () {
+      Taro.eventCenter.trigger('custom-tabbar:select', 1)
+      Taro.setNavigationBarTitle({ title: '待办' })
       reload()
       autoSync().then(function () {
         reload()
@@ -301,7 +303,7 @@ export default function TodoPage() {
                 className={'todo-box' + (t.done ? ' todo-box-on' : '')}
                 onClick={function () { onToggle(t.id) }}
               >
-                {t.done ? '✓' : ''}
+                {t.done ? <Text className='todo-check'>✓</Text> : ''}
               </View>
               <View className='todo-body' onClick={function () { onToggle(t.id) }}>
                 <Text className={'todo-title' + (t.done ? ' todo-title-done' : '')}>{t.title}</Text>

@@ -1,4 +1,4 @@
-# 项目状态总览（2026-11-15）
+# 项目状态总览（更新于 2026-11-16）
 
 > 一份文档说明「今日一页 / 学业工作台」当前做到了哪一步：两端功能对照、云同步与数据库、隐私合规、发布方式、遗留事项。
 > 更细的代码级说明见 [docs/wiki](wiki/README.md)。
@@ -8,7 +8,7 @@
 | 端 | 位置 | 技术 | 部署 |
 | --- | --- | --- | --- |
 | 网页版 | 仓库根目录 `index.html` / `style.css` / `app.js` | 原生 HTML/CSS/JS，零构建 | GitHub Pages（推 `main` 自动发布） |
-| 微信小程序 | `miniapp/` | Taro 4.1.9 + React 18 + TypeScript（designWidth 375） | 微信公众平台 · 体验版（当前 1.1.6） |
+| 微信小程序 | `miniapp/` | Taro 4.1.9 + React 18 + TypeScript（designWidth 375） | 微信公众平台 · 开发版（当前 1.1.8，待手动设为体验版） |
 
 两端共用同一套数据结构和云同步协议，数据默认只存本机，开启云同步后可互相同步。
 
@@ -31,7 +31,7 @@
 | 重置打卡 / 清空数据 | ✅ | ✅ |
 | 桌面宽屏布局 | ✅ | — （移动端布局） |
 
-数据结构版本 `SCHEMA_VERSION = 3`，两端一致；示例数据与「填入示例课程」入口已全部下线，旧数据里的示例课程/示例打卡分钟会在读取时自动剔除并同步回云端。
+数据结构版本 `SCHEMA_VERSION = 4`，两端一致；示例数据功能与「填入示例课程」入口已下线，读取旧数据时会自动剔除示例课程、扣回示例打卡分钟（`sanitize()` 中完成），字段本身保留但恒为空对象以兼容旧快照。
 
 待办类别固定为四类：`学业课程`、`学科竞赛`、`文体活动`、`其他`；旧数据里的「其他」继续有效。
 
@@ -76,14 +76,23 @@
 ### 小程序
 
 1. `cd miniapp && npm run build:weapp`
-2. 用 `miniprogram-ci` 上传（脚本在系统临时目录，改 version 后运行），二维码输出到 `.screenshots/preview-qr.jpg`
-3. 微信公众平台 → 管理 → 版本管理：设为体验版（自用）；要对外则提交审核 → 发布
+2. 生成开发版预览二维码（不上传、不影响线上版本）：
+   ```bash
+   MINIPROGRAM_PRIVATE_KEY="C:/path/to/private.<appid>.key" npm run preview
+   ```
+   脚本为 `miniapp/scripts/preview.js`，二维码输出到仓库根 `.screenshots/preview-qr.jpg`；密钥只从环境变量读取，不进仓库。过期需重新生成。
+3. 上传体验版时用 `miniprogram-ci` 的 `ci.upload`（上传密钥同上）；微信公众平台 → 管理 → 版本管理：设为体验版（自用）；要对外则提交审核 → 发布
 4. 服务器域名需加入：云函数 URL 域名、`https://api.bilibili.com`
 5. 仓库里的 `project.config.json` 用占位 AppID，真实 AppID 在本机被忽略的 `project.private.config.json`
+6. 动效改动必须遵守 [08 动效开发规范](wiki/08-motion-standards.md)（门禁 + 验收清单）；小程序端材质/层级/自定义 tabBar/闪烁等约定见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md)（含踩坑日志，强制）
 
 ### 网页版
 
 推送到 `main` 后由 GitHub Pages 自动部署，强制刷新即可看到新版本。
+
+### 版本控制（两端通用，强制）
+
+改动后及时 `git add` → `git commit -m '...'` → `git push`，别把大量改动长期留在工作区；代码与文档一并提交。提交前确认没有密钥、私钥、`project.private.config.json`、二维码等被带进仓库（详见 [07 运行与部署](wiki/07-run-and-deploy.md) 第 3.1 节）。
 
 ### 已知环境问题
 
@@ -105,15 +114,24 @@ study-dashboard/
 │   ├── schema.sql                      主表 + RLS + Realtime
 │   └── history.sql                     历史归档表 + 触发器
 ├── miniapp/                            微信小程序（Taro + React + TS）
+│   ├── scripts/preview.js              开发版预览码生成读密钥走环境变量
 │   └── src/
 │       ├── pages/                      study / todo / calendar / courses / settings
 │       ├── components/                 Sheet、Prompt、MiniCalendar、DayDetail
-│       └── data/                       store、cloud、types、date、sanitize、todoImport
-├── worker/                             历史方案（Cloudflare Workers + D1），已停用
+│       ├── custom-tab-bar/             自定义胶囊底栏（Apple 液态玻璃 + 关键帧动画）
+│       └── data/                       store、cloud、types、date、sanitize、todoImport、motion、overlay
+├── worker/                             历史方案（Cloudflare Workers + D1），已停用，仅追溯
 └── assets/                             应用图标
 ```
 
-## 7. 遗留与后续
+## 7. 近期已完成
+
+- **1.1.8（已上传，开发版）**：Apple 液态玻璃界面与自定义胶囊底栏、弹层打开隐藏底栏、弹窗退场/操作反馈/页面切换显影动画、弹窗加透、打卡当天可累加按天去重、导航栏标题兜底、日历红框标记待办与打卡。详见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md) 的踩坑日志。
+- **1.1.7（已上传）**：学习页热力图与日历页月历用红框标记待办 / 完成 / 打卡。
+- **示例数据功能下线**：填入 / 清除示例入口及相关函数已删除，遗留字段读入时自动剔除；两端文档已同步更正。
+- **文档规范齐备**：[08 动效开发规范](wiki/08-motion-standards.md) 与 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md) 已落地并随代码维护。
+
+## 8. 遗留与后续
 
 - **定时学习提醒（未实现，方案已定）**：GitHub Actions 定时读 Supabase，按「早上提醒今天要做的事 / 每晚提醒未打卡 / 断签预警 / 每周复盘」四类判定后推送到通知渠道；渠道待选（飞书群机器人最省事，微信订阅消息受个人主体一次性订阅限制）。
 - 网页端 B 站导入依赖外部 AI 生成 JSON；小程序已可直连 B 站接口。
