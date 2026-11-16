@@ -3173,6 +3173,10 @@ input:focus {
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  /* overflow-y:auto 会让水平方向也变 auto，贴边的 face 粉晕会被裁。
+     左右留 12px 内边距给下拉框光晕扩散，字段仍左对齐（一起内缩）。 */
+  padding-inline: 12px;
+  margin-inline: -12px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -4039,11 +4043,10 @@ input:focus {
 
 .glass-select.is-open .glass-select-face,
 .glass-select:focus-within .glass-select-face {
-  /* 2px 实红：1px 在圆角弧线处被抗锯齿摊薄，四角看起来像被裁断。
-     外侧不要任何带颜色的扩散光环——圆角处环形包裹会糊成一圈粉晕，像红线被吞掉；
-     只留内侧顶部高光，让描边四边锐利、干净、连续。 */
+  /* 2px 实红 + 外侧粉晕：1px 在圆角弧线处会被抗锯齿摊薄，故用 2px 保证四角连续。 */
   border: 2px solid var(--red);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 3px rgba(192, 69, 58, 0.1),
+    0 2px 8px rgba(192, 69, 58, 0.1);
 }
 
 .glass-select-face {
