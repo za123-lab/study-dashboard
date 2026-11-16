@@ -4039,11 +4039,11 @@ input:focus {
 
 .glass-select.is-open .glass-select-face,
 .glass-select:focus-within .glass-select-face {
-  /* 2px 实红：1px 在圆角弧线处被抗锯齿摊薄成浅粉，四角看起来像被裁断。
-     光环改淡并加柔化，避免在圆角处盖过红线。 */
+  /* 2px 实红：1px 在圆角弧线处被抗锯齿摊薄，四角看起来像被裁断。
+     外侧不要任何带颜色的扩散光环——圆角处环形包裹会糊成一圈粉晕，像红线被吞掉；
+     只留内侧顶部高光，让描边四边锐利、干净、连续。 */
   border: 2px solid var(--red);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 3px rgba(192, 69, 58, 0.1),
-    0 2px 8px rgba(192, 69, 58, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .glass-select-face {
