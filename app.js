@@ -6036,7 +6036,8 @@
 /* ==========================================================
    玻璃下拉：原生 select 保留值/表单/键盘语义，
    外观与展开列表由一层玻璃 UI 接管（原生弹出列表各家浏览器都改不了）。
-   预览阶段独立引入；正式应用时并入 app.js。
+   面板挂到 body 用 fixed 定位（按触发框视口坐标），避免被弹层 .todo-form
+   的 overflow-y:auto 裁切；滚动时跟随重定位而非关闭。
    ========================================================== */
 
 (function () {
@@ -6052,6 +6053,37 @@
 
   var openWrap = null;
   var closeTimer = null;
+  var PANEL_GAP = 6;   // 面板与触发框的间距
+  var EDGE = 8;        // 视口边缘留白
+  var MAX_H = 260;     // 与 CSS max-height 一致
+
+  // 面板 reposition：按触发框视口坐标定位，优先向下，空间不足则向上翻；
+  // 左右做视口钳制，避免窄屏或弹层右缘滚动条处溢出。
+  function positionPanel(wrap) {
+    var select = wrap.querySelector("select");
+    var panel = select.__glassPanel;
+    if (!panel || panel.hidden) return;
+    var r = wrap.getBoundingClientRect();
+    var h = Math.min(panel.offsetHeight || MAX_H, MAX_H);
+    var vh = window.innerHeight;
+    var vw = window.innerWidth;
+    var width = Math.max(Math.min(r.width, vw - EDGE * 2), 120);
+
+    var left = r.left;
+    if (left + width > vw - EDGE) left = vw - EDGE - width;
+    if (left < EDGE) left = EDGE;
+
+    var top = r.bottom + PANEL_GAP;
+    if (top + h > vh - EDGE) {
+      var above = r.top - PANEL_GAP - h;
+      top = above >= EDGE ? above : Math.max(EDGE, vh - EDGE - h);
+    }
+    if (top < EDGE) top = EDGE;
+
+    panel.style.width = width + "px";
+    panel.style.left = Math.round(left) + "px";
+    panel.style.top = Math.round(top) + "px";
+  }
 
   function labelOf(select) {
     var i, o = select.selectedOptions && select.selectedOptions[0];
@@ -6069,7 +6101,7 @@
 
   function buildPanel(wrap) {
     var select = wrap.querySelector("select");
-    var panel = wrap.querySelector("." + PANEL);
+    var panel = select.__glassPanel;
     var frag = document.createDocumentFragment();
     var options = Array.prototype.slice.call(select.options);
 
@@ -6123,14 +6155,18 @@
     if (openWrap && openWrap !== wrap) close(true);
 
     var select = wrap.querySelector("select");
-    var panel = wrap.querySelector("." + PANEL);
+    var panel = select.__glassPanel;
     buildPanel(wrap);
 
     openWrap = wrap;
+    // 挂到 body：脱离弹层滚动容器的 overflow 裁切
+    if (panel.parentNode !== document.body) document.body.appendChild(panel);
     panel.hidden = false;
     select.setAttribute("aria-expanded", "true");
-    void panel.offsetWidth; // 强制回流，让 opacity/transform 从初始态起跳
     wrap.classList.add("is-open");
+    positionPanel(wrap);
+    void panel.offsetWidth; // 回流锁定初始态（opacity:0 / translateY），让淡入能起跳
+    panel.classList.add("is-open");
 
     var chosen = panel.querySelector('[aria-selected="true"]:not([disabled])') ||
       panel.querySelector("." + OPT + ":not([disabled])");
@@ -6141,17 +6177,19 @@
     if (!openWrap) return;
     var wrap = openWrap;
     var select = wrap.querySelector("select");
-    var panel = wrap.querySelector("." + PANEL);
+    var panel = select.__glassPanel;
 
     openWrap = null;
     select.setAttribute("aria-expanded", "false");
     wrap.classList.remove("is-open");
+    panel.classList.remove("is-open");
     clearTimeout(closeTimer);
     closeTimer = setTimeout(function () {
       // 期间可能又打开了同一个，别把新列表清掉
       if (wrap !== openWrap) {
         panel.hidden = true;
         panel.textContent = "";
+        panel.style.width = "";
       }
     }, immediate || reduceMotion ? 0 : CLOSE_MS);
   }
@@ -6178,7 +6216,9 @@
     wrap.appendChild(select);
     wrap.appendChild(face);
     wrap.appendChild(trigger);
-    wrap.appendChild(panel);
+    // 面板不进 wrap：直接挂 body，由 fixed 定位接管
+    document.body.appendChild(panel);
+    select.__glassPanel = panel;
 
     select.classList.add("glass-select-native");
     select.setAttribute("aria-haspopup", "listbox");
@@ -6207,13 +6247,27 @@
   }
 
   document.addEventListener("mousedown", function (e) {
-    if (openWrap && !openWrap.contains(e.target)) close();
+    if (!openWrap) return;
+    var select = openWrap.querySelector("select");
+    var panel = select.__glassPanel;
+    // 面板已移出 wrap，命中面板或触发框都算「内部」，不关
+    if (openWrap.contains(e.target) || panel.contains(e.target)) return;
+    close();
   });
   window.addEventListener("resize", function () {
-    if (openWrap) close(true);
+    if (openWrap) {
+      // 布局变了重新贴位，不关面板
+      positionPanel(openWrap);
+    }
   });
-  window.addEventListener("scroll", function () {
-    if (openWrap) close(true);
+  // 用 capture 捕获弹层 .todo-form 等内部容器的滚动（这类 scroll 不冒泡到 window）
+  window.addEventListener("scroll", function (e) {
+    if (!openWrap) return;
+    var select = openWrap.querySelector("select");
+    var panel = select.__glassPanel;
+    // 面板自身的滚动：让它能滚选更多项，不重定位也不关闭
+    if (panel.contains(e.target)) return;
+    positionPanel(openWrap);
   }, true);
 
   function init() {

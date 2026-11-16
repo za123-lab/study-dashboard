@@ -4095,19 +4095,21 @@ input:focus {
   cursor: pointer;
 }
 
-/* 面板是低频组件：180ms 从触发点上方显影，退场 140ms */
+/* 面板挂到 body 用 fixed 定位：脱离弹层 .todo-form 的 overflow 裁切与滚动条挤压。
+   180ms 从触发点显影，退场 140ms；top/left/width 由脚本按触发框视口坐标设置。 */
 .glass-select-panel {
-  position: absolute;
-  top: calc(100% + 6px);
+  position: fixed;
+  top: 0;
   left: 0;
-  z-index: 40;
+  z-index: 60;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 100%;
+  min-width: 0;
   max-height: 260px;
   padding: 5px;
   overflow: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(118deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.12) 42%, rgba(255, 255, 255, 0) 60%),
     rgba(251, 248, 240, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.82);
@@ -4128,7 +4130,8 @@ input:focus {
   display: none;
 }
 
-.glass-select.is-open .glass-select-panel {
+/* 面板已移出 .glass-select，不能再靠祖先 .is-open 选中，改用自身状态类 */
+.glass-select-panel.is-open {
   opacity: 1;
   transform: none;
   pointer-events: auto;
