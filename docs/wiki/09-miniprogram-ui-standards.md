@@ -192,8 +192,40 @@ npm run build:weapp
 
 - `npm run preview`（`scripts/preview.js`）：`ci.preview` 生成**开发版预览码**，扫码看最新 dist，不影响后台版本，25 分钟过期。密钥只从 `MINIPROGRAM_PRIVATE_KEY` 环境变量读，绝不写进脚本/仓库。
 - `ci.upload`（临时脚本 `C:/Users/22608/AppData/Local/Temp/taro-upload-miniapp.js`）：上传到后台是**开发版本**，不会自动变体验版；需到公众平台 → 管理 → 版本管理手动设为体验版。
-- 当前版本 **1.1.8**，描述「液态玻璃界面与底栏动效、弹窗加透、标题兜底」；下次上传递增到 1.1.9。
+- 当前版本 **1.2.0**，描述「Apple规范全修：两端交互反馈与动效、减少动效开关、防重复提交；修复底栏闪现」；下次上传递增到 1.2.1。
+- 上传密钥在 `C:/Users/22608/Downloads/private.wxda700742e96716d0.key`（只从环境变量/临时脚本读，不入库）；本机微信开发者工具是旧 NW.js 版，`wechatide` CLI 不兼容，预览/上传均走 `miniprogram-ci`（`scripts/preview.js` + 临时 `taro-upload-*.js`），不走 IDE。
 - `dist/project.config.json` 默认 `touristappid`，本地导入需换真实 AppID（`wxda700742e96716d0`），真实配置在本机被忽略的 `project.private.config.json`。
+
+#### 7.2.1 开发版二维码生成 SOP（标准操作，直接复制）
+
+一句话流程：**改完代码 → 重新构建 → 生成预览码 → 手机微信扫码**。二维码不会自动更新，每次改代码都必须重跑，且 **25 分钟后过期**。
+
+前置条件（缺一不可）：
+
+- `miniapp/dist/app.json` 存在——先构建，二维码只反映 dist；
+- 上传密钥在 `C:/Users/22608/Downloads/private.wxda700742e96716d0.key`；
+- 扫码的微信必须是该小程序的**开发者或体验者**——开发版码不对外开放，其他人扫不开。
+
+在 `miniapp/` 下执行（Git Bash）：
+
+```bash
+# 1) 先构建，确保 dist 包含最新改动
+npm run build:weapp
+
+# 2) 生成开发版二维码；密钥只走环境变量，绝不写进脚本或仓库
+MINIPROGRAM_PRIVATE_KEY="C:/Users/22608/Downloads/private.wxda700742e96716d0.key" \
+PREVIEW_DESC="今日一页 · 开发版预览 $(date +%m%d-%H%M)" \
+npm run preview
+```
+
+成功标志：终端打印 `PREVIEW_OK <路径>`，二维码落到仓库根 `.screenshots/preview-qr.jpg`（可用 `PREVIEW_QR_DEST` 改输出路径，用 `MINIPROGRAM_APPID` 覆盖 AppID）。
+
+要点与坑：
+
+- 本机微信开发者工具是旧 NW.js 版，`wechatide` CLI 不兼容——**预览/上传一律走 `miniprogram-ci`，不要用 IDE 命令生成二维码**。
+- `ci.preview` 只上传预览包，不影响后台版本，也不需要点「设为体验版」。
+- 生成需联网（走 `servicewechat.com`，本机走代理 `http://127.0.0.1:52131`）；断网或开发机 IP 不在白名单会失败。
+- 失败时原样看 `FAILED:` 与 `errCode`，按错误码处理，不要盲目重试；常见是密钥过期/IP 白名单/未构建。
 
 ### 7.3 真机必测项
 
