@@ -39,7 +39,7 @@
   border-radius: 20px 20px 0 0;
   box-shadow: 0 -14px 44px rgba(24, 36, 52, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 -1px 0 rgba(32, 52, 78, 0.05);
-  animation: sheet-up 320ms var(--ease-drawer) both;
+  animation: sheet-up 280ms var(--ease-drawer) both;
   will-change: transform, opacity;
 }
 
@@ -252,7 +252,7 @@
   box-shadow: 0 -14px 44px rgba(24, 36, 52, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 -1px 0 rgba(32, 52, 78, 0.05);
   overflow: hidden;
-  animation: sheet-up 320ms var(--ease-drawer) both;
+  animation: sheet-up 280ms var(--ease-drawer) both;
   will-change: transform, opacity;
 }
 
@@ -268,7 +268,7 @@
   }
 }
 
-/* 退场：比进场快（220ms vs 320ms），系统响应要利落；向下沉回 + 淡出，与进场反向 */
+/* 退场：比进场快（220ms vs 280ms），系统响应要利落；向下沉回 + 淡出，与进场反向 */
 @keyframes sheet-down {
   from {
     transform: none;
@@ -420,11 +420,11 @@
 }
 
 .stepper-btn {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   margin-right: 10px;
   font-size: 17px;
-  line-height: 28px;
+  line-height: 38px;
   text-align: center;
   color: var(--ink);
   background: rgba(255, 255, 255, 0.42);
@@ -453,6 +453,12 @@
   margin-top: 18px;
 }
 
+/* 退场动画期间整块 footer 不可点，杜绝连点重复提交 */
+.foot-closing {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
 .sheet-btn {
   width: 48%;
   height: 46px;
@@ -476,6 +482,11 @@
   border: 1px solid var(--red);
   box-shadow: 0 4px 14px rgba(192, 69, 58, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   letter-spacing: 0.08em;
+}
+
+/* 请求在途（B 站导入）时按钮置灰，配合 JS 同步锁 */
+.sheet-btn-ok.is-disabled {
+  opacity: 0.62;
 }
 
 .panel-actions {

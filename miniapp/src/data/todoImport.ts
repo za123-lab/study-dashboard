@@ -134,6 +134,8 @@ export function parseTodoImport(raw: string, existing: Todo[]): TodoImportResult
     return { error: 'JSON 顶层必须是对象 {...} 或数组 [...]。' }
   }
 
+  // 收窄 list 类型：上面的分支已保证非 null，给 TS 一个显式守卫
+  if (!list) return { error: '没有可导入的待办。' }
   if (!list.length) return { error: '没有可导入的待办：列表是空的。' }
   if (list.length > 500) {
     return { error: '一次最多导入 500 条，当前 ' + list.length + ' 条，请分批复制。' }

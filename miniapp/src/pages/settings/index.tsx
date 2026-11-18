@@ -19,6 +19,7 @@ import type { HistoryItem, SyncStatus } from '../../data/cloud'
 import { confirmText, PromptHost } from '../../components/Prompt'
 import { commit, emptyState, getState, reload, replaceState } from '../../data/store'
 import { sanitize } from '../../data/sanitize'
+import { useReduceMotion, setReduceMotion } from '../../data/a11y'
 import './index.scss'
 
 function pad(n: number): string {
@@ -43,6 +44,7 @@ function statusText(s: SyncStatus): string {
 }
 
 export default function SettingsPage() {
+  const { enabled: reduceMotion, motionClass } = useReduceMotion()
   const [base, setBase] = useState('')
   const [token, setToken] = useState('')
   const [status, setStatus] = useState<SyncStatus>(getStatus())
@@ -245,7 +247,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <View className='page sync-page'>
+    <View className={'page sync-page' + motionClass}>
       <View className='masthead'>
         <View>
           <Text className='kicker mono'>CLOUD · SUPABASE</Text>
@@ -310,7 +312,7 @@ export default function SettingsPage() {
           <Text className='field-label mono'>SYNC TOKEN</Text>
           <Input
             className='field-input'
-            type='text'
+            password
             value={token}
             placeholder='云函数里的 SYNC_TOKEN'
             placeholderClass='field-ph'
@@ -338,6 +340,21 @@ export default function SettingsPage() {
             清空本机配置
           </Text>
         )}
+      </View>
+
+      <View className='panel'>
+        <View className='panel-head'>
+          <View>
+            <Text className='panel-title'>外观</Text>
+            <Text className='panel-cap'>减少动效：关掉面板滑动与弹跳，只留短淡入</Text>
+          </View>
+        </View>
+        <View className='a11y-row' onClick={function () { setReduceMotion(!reduceMotion) }}>
+          <Text className='a11y-label'>减少动效</Text>
+          <View className={'a11y-switch' + (reduceMotion ? ' is-on' : '')}>
+            <View className='a11y-knob' />
+          </View>
+        </View>
       </View>
 
       <View className='panel'>

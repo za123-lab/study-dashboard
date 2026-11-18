@@ -41,6 +41,8 @@
   }
 }
 
+/* 独立渲染层里 CSS 变量解析不可靠——曲线必须写字面值，不能用 var(--ease-drawer)，
+   否则 animation 整条失效、底栏直接闪现。时长 320ms 与 tabbar-down 260ms 保持非对称。 */
 .tabbar-shown {
   animation: tabbar-up 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { View, Text, Input } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import Sheet from '../../components/Sheet'
@@ -7,9 +7,11 @@ import { clampInt, fmtDur, makeId, parseDuration } from '../../data/date'
 import { addActivity, commit, courseStats, getState, overallStats, recordDetail, reload } from '../../data/store'
 import type { Course, Lesson } from '../../data/types'
 import { autoSync } from '../../data/cloud'
+import { useReduceMotion } from '../../data/a11y'
 import './index.scss'
 
 export default function CoursesPage() {
+  const { motionClass } = useReduceMotion()
   const [, setTick] = useState(0)
   const [openId, setOpenId] = useState('')
   const [newOpen, setNewOpen] = useState(false)
@@ -19,6 +21,8 @@ export default function CoursesPage() {
   const [biliOpen, setBiliOpen] = useState(false)
   const [biliInput, setBiliInput] = useState('')
   const [biliBusy, setBiliBusy] = useState(false)
+  // 同步锁：setState 是异步的，15s 请求窗口内连点会穿透，用 ref 立即挡住
+  const biliBusyRef = useRef(false)
   const [lesOpen, setLesOpen] = useState(false)
   const [lesCourse, setLesCourse] = useState('')
   const [lesId, setLesId] = useState('')
@@ -196,17 +200,21 @@ export default function CoursesPage() {
   }
 
   function onImportBili() {
+    // 同步防连点：请求在途时直接返回，避免并发建出重复课程
+    if (biliBusyRef.current) return
     const match = biliInput.match(/BV[0-9A-Za-z]{10}/)
     if (!match) {
       Taro.showToast({ title: '没识别出 BV 号', icon: 'none' })
       return
     }
     const bv = match[0]
+    biliBusyRef.current = true
     setBiliBusy(true)
     Taro.request({
       url: 'https://api.bilibili.com/x/web-interface/view?bvid=' + bv,
       timeout: 15000,
       success: function (res) {
+        biliBusyRef.current = false
         setBiliBusy(false)
         const data = res.data as any
         if (!data || data.code !== 0 || !data.data) {
@@ -240,6 +248,7 @@ export default function CoursesPage() {
         Taro.showToast({ title: '已导入 ' + pages.length + ' 节', icon: 'success' })
       },
       fail: function () {
+        biliBusyRef.current = false
         setBiliBusy(false)
         Taro.showToast({ title: '请求失败，先检查域名白名单', icon: 'none' })
       },
@@ -247,7 +256,7 @@ export default function CoursesPage() {
   }
 
   return (
-    <View className='page'>
+    <View className={'page' + motionClass}>
       <View className='masthead'>
         <View>
           <Text className='kicker mono'>COURSES</Text>
@@ -311,7 +320,10 @@ export default function CoursesPage() {
                 <Text className='link-btn' onClick={function () { onAddLessonOrDelete(course) }}>⋯</Text>
               </View>
               <View className='bar'>
-                <View className='bar-fill' style={'width:' + s.pct + '%'} />
+                <View
+                  className='bar-fill'
+                  style={'transform:scaleX(' + Math.max(0, Math.min(100, s.pct)) / 100 + ')'}
+                />
               </View>
               <Text className='course-meta'>
                 {s.count} 节 · 已看 {s.watchedMin} / {s.totalMin} 分钟 · 看完 {s.doneLessons} 节
@@ -495,7 +507,10 @@ export default function CoursesPage() {
           footer={
             <View className='sheet-foot'>
               <View className='sheet-btn sheet-btn-cancel' onClick={function () { setBiliOpen(false) }}>取消</View>
-              <View className='sheet-btn sheet-btn-ok' onClick={onImportBili}>
+              <View
+                className={'sheet-btn sheet-btn-ok' + (biliBusy ? ' is-disabled' : '')}
+                onClick={onImportBili}
+              >
                 {biliBusy ? '导入中…' : '导入'}
               </View>
             </View>

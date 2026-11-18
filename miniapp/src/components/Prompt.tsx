@@ -166,7 +166,7 @@ export function PromptHost() {
           )}
         </View>
 
-        <View className='sheet-foot'>
+        <View className={'sheet-foot' + (closing ? ' foot-closing' : '')}>
           <View className='sheet-btn sheet-btn-cancel' onClick={function () { close(null) }}>
             取消
           </View>

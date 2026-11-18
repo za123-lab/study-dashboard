@@ -3,6 +3,7 @@ import { View, Text, Input } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import Sheet, { Chip } from '../../components/Sheet'
 import MiniCalendar from '../../components/MiniCalendar'
+import { useReduceMotion } from '../../data/a11y'
 import { addDays, dateKey, makeId, todayKey } from '../../data/date'
 import {
   commit,
@@ -24,6 +25,7 @@ import './index.scss'
 type Filter = 'open' | 'done' | 'all'
 
 export default function TodoPage() {
+  const { motionClass } = useReduceMotion()
   const [, setTick] = useState(0)
   const [filter, setFilter] = useState<Filter>('open')
   const [newOpen, setNewOpen] = useState(false)
@@ -237,7 +239,7 @@ export default function TodoPage() {
   }
 
   return (
-    <View className='page'>
+    <View className={'page' + motionClass}>
       <View className='masthead'>
         <View>
           <Text className='kicker mono'>TODO</Text>

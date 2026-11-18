@@ -34,19 +34,36 @@ function loadCfg(): CloudCfg {
 }
 
 let cfg: CloudCfg = loadCfg()
-let dirty: boolean = Taro.getStorageSync(DIRTY_KEY) === true
+let dirty: boolean = readDirty()
 let busy = false
 let timer: any = null
 let status: SyncStatus = { state: 'off', message: '未配置', at: 0 }
 
 const listeners: Array<(s: SyncStatus) => void> = []
 
+function readDirty(): boolean {
+  try {
+    return Taro.getStorageSync(DIRTY_KEY) === true
+  } catch (err) {
+    return false
+  }
+}
+
 function persist(): void {
-  Taro.setStorageSync(CFG_KEY, cfg)
+  // 存储写入失败不能让"云端已同步成功"误报为失败；吞掉异常，内存状态仍是准的
+  try {
+    Taro.setStorageSync(CFG_KEY, cfg)
+  } catch (err) {
+    // 存储满 / 权限异常：本次不落盘，下次同步会基于内存 cfg 重试
+  }
 }
 
 function persistDirty(): void {
-  Taro.setStorageSync(DIRTY_KEY, dirty)
+  try {
+    Taro.setStorageSync(DIRTY_KEY, dirty)
+  } catch (err) {
+    // 同上，不影响内存脏标记
+  }
 }
 
 function setStatus(state: SyncState, message: string): void {

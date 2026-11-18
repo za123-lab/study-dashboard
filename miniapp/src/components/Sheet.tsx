@@ -26,6 +26,8 @@ export default function Sheet(props: SheetProps) {
 
   const maskCls = 'sheet-mask' + (closing ? ' mask-closing' : '')
   const cardCls = 'sheet-card' + (closing ? ' card-closing' : '')
+  // 退场动画期间禁用 footer：防止连点在弹层卸载前重复 commit（重复建课/待办/打卡）
+  const footCls = 'sheet-foot' + (closing ? ' foot-closing' : '')
 
   return (
     <View className={maskCls} onClick={dismiss}>
@@ -38,7 +40,7 @@ export default function Sheet(props: SheetProps) {
           <Text className='sheet-close' onClick={dismiss}>关闭</Text>
         </View>
         <View className='sheet-body'>{props.children}</View>
-        <View className='sheet-foot'>{props.footer}</View>
+        <View className={footCls}>{props.footer}</View>
       </View>
     </View>
   )

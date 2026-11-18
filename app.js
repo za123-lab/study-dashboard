@@ -1082,9 +1082,9 @@
       "</div>" +
       '<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
       st.pct +
-      '"><span style="width:' +
-      st.pct +
-      '%"></span></div>' +
+      '"><span style="transform:scaleX(' +
+      Math.max(0, Math.min(100, st.pct)) / 100 +
+      ')"></span></div>' +
       '<button type="button" class="btn ghost course-toggle" data-cid="' +
       course.id +
       '" aria-expanded="' +
@@ -1165,9 +1165,9 @@
       '" placeholder="0:00" aria-label="第 ' +
       (idx + 1) +
       ' 节已看时长"></label>' +
-      '<div class="l-bar"><i style="width:' +
-      (pct || 0) +
-      '%"></i></div>' +
+      '<div class="l-bar"><i style="transform:scaleX(' +
+      Math.max(0, Math.min(100, pct || 0)) / 100 +
+      ')"></i></div>' +
       '<span class="l-pct mono">' +
       (pct === null ? "—" : pct + "%") +
       "</span>" +

@@ -4,7 +4,8 @@ import Taro, { useDidShow } from '@tarojs/taro'
 import DayDetail from '../../components/DayDetail'
 import Sheet, { Chip } from '../../components/Sheet'
 import { PromptHost, promptText, confirmText } from '../../components/Prompt'
-import { addDays, dateKey, parseDuration, todayKey, WEEK_CN } from '../../data/date'
+import { useReduceMotion } from '../../data/a11y'
+import { addDays, dateKey, fmtDur, parseDuration, todayKey, WEEK_CN } from '../../data/date'
 import {
   addCheckin,
   addCheckinLog,
@@ -84,6 +85,7 @@ function buildHeat(weeks: number): HeatCell[][] {
 }
 
 export default function StudyPage() {
+  const { motionClass } = useReduceMotion()
   const [, setTick] = useState(0)
   const [dayOpen, setDayOpen] = useState('')
   const [newOpen, setNewOpen] = useState(false)
@@ -184,22 +186,37 @@ export default function StudyPage() {
         Taro.showToast({ title: '这门课已经看完了', icon: 'none' })
         return
       }
-      const remain = target.lesson.totalMin - target.lesson.watchedMin
+      // 与网页版一致：填「本次看到哪里」的绝对进度，新增分钟 = 目标 - 当前已看
+      const before = target.lesson.watchedMin || 0
+      const total = target.lesson.totalMin || 0
+      const suggest = total > 0 ? Math.min(total, before + 15) : before + 15
       const input = await promptText(
-        '第 ' + target.idx + ' 节 · 还剩 ' + remain + ' 分钟',
-        '这次看了多少分钟',
-        String(remain)
+        '第 ' + target.idx + ' 节 · 本次看到哪里了',
+        '例如 ' + fmtDur(suggest) + ' 或 ' + suggest,
+        fmtDur(suggest),
+        '当前已看 ' + fmtDur(before) + (total ? ' / ' + fmtDur(total) : '（未填总时长）') +
+          '。填这一节看完后的进度位置，只把新增的分钟记入今天。'
       )
       if (input == null) return
       const parsed = parseDuration(input)
-      if (parsed == null || parsed <= 0) {
-        Taro.showToast({ title: '请填写有效分钟数', icon: 'none' })
+      if (parsed == null) {
+        Taro.showToast({ title: '进度格式看不懂，可以填 83 或 1:23', icon: 'none' })
         return
       }
-      const use = Math.min(parsed, remain)
-      addCheckinLog(item, { min: use, cid: course.id, lid: target.lesson.id })
+      let goal = Math.round(parsed)
+      if (total > 0) goal = Math.min(goal, total)
+      goal = Math.min(9999, goal)
+      if (goal <= before) {
+        Taro.showToast({ title: '这次填的进度没有超过当前已看 ' + fmtDur(before), icon: 'none' })
+        return
+      }
+      const delta = goal - before
+      addCheckinLog(item, { min: delta, cid: course.id, lid: target.lesson.id })
       refresh()
-      Taro.showToast({ title: '已记 ' + use + ' 分钟', icon: 'success' })
+      Taro.showToast({
+        title: '已打卡 +' + delta + ' 分钟，今天累计 ' + (state.activity[today] || 0) + ' 分钟',
+        icon: 'success',
+      })
       return
     }
 
@@ -228,7 +245,7 @@ export default function StudyPage() {
   }
 
   return (
-    <View className='page'>
+    <View className={'page' + motionClass}>
       <View className='masthead'>
         <View>
           <Text className='kicker mono'>STUDY HUB · 学业 · 待办 · 日程</Text>

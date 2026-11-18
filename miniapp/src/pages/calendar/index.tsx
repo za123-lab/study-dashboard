@@ -5,6 +5,7 @@ import DayDetail from '../../components/DayDetail'
 import { dateKey, todayKey } from '../../data/date'
 import { calUrgency, dayStats, getState, reload, todosOnDay } from '../../data/store'
 import { autoSync } from '../../data/cloud'
+import { useReduceMotion } from '../../data/a11y'
 import './index.scss'
 
 const WEEK_HEAD = ['一', '二', '三', '四', '五', '六', '日']
@@ -45,6 +46,7 @@ function buildMonth(year: number, month: number): Cell[] {
 }
 
 export default function CalendarPage() {
+  const { motionClass } = useReduceMotion()
   const [, setTick] = useState(0)
   const [offset, setOffset] = useState(0)
   const [dayOpen, setDayOpen] = useState('')
@@ -85,7 +87,7 @@ export default function CalendarPage() {
   }
 
   return (
-    <View className='page'>
+    <View className={'page' + motionClass}>
       <View className='masthead'>
         <View>
           <Text className='kicker mono'>CALENDAR</Text>
