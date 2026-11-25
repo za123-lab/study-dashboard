@@ -5,3 +5,4 @@ Thumbs.db
 *.log
 .workbuddy/
 *.genie
+.tmp-skill/

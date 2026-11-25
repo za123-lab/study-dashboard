@@ -34,6 +34,7 @@
 | [07 运行与部署](07-run-and-deploy.md) | 本地运行、静态托管、Supabase 接入、故障排查 | 首次部署的人 |
 | [08 动效开发规范](08-motion-standards.md) | 动效门禁、十条标准、Web/小程序两端实现约定、审查格式与验收清单 | 改界面或动效的人（强制） |
 | [09 小程序界面与交互开发规范](09-miniprogram-ui-standards.md) | Apple 液态玻璃材质、自定义 tabBar 独立层、弹层层级、闪烁根治、打卡去重、发布与踩坑日志 | 改小程序端界面/交互的人（强制） |
+| [10 桌面小组件插件](10-desktop-widget-plugin.md) | DSH 插件形态：宿主路由与鉴权、侧栏面板、Electron 小窗、统计口径对齐、踩坑记录 | 改插件/桌面端的人 |
 | [项目状态总览](../PROJECT-STATUS.md) | 两端功能对照、云同步现状、隐私合规、发布流程、遗留事项 | 想快速了解当前进度的人 |
 
 ## 3. 仓库文件清单
@@ -44,6 +45,8 @@ study-dashboard/
 ├── style.css               # 全部样式（设计令牌 / 组件 / 响应式 / 动画）
 ├── app.js                  # 全部前端逻辑（数据层 / 渲染层 / 云同步 / 事件）
 ├── DESIGN.md               # 界面改版设计说明（信息归属、颜色语义、排版规则）
+├── plugins/                # DSH 插件包（每个子目录一个 @local/* 包，说明见 plugins/README.md）
+│   └── study-widget/       # 学业工作台桌面小组件：桌面小窗 / 侧栏面板 / 助手工具 / 斜杠命令
 ├── supabase/
 │   ├── schema.sql          # 建表 + RLS + 触发器 + Realtime 发布（可重复执行）
 │   └── README.md           # Supabase 配置手册与同步规则对照表

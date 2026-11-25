@@ -1,6 +1,6 @@
-# 项目状态总览（更新于 2026-11-16）
+# 项目状态总览（更新于 2026-11-25）
 
-> 一份文档说明「今日一页 / 学业工作台」当前做到了哪一步：两端功能对照、云同步与数据库、隐私合规、发布方式、遗留事项。
+> 一份文档说明「今日一页 / 学业工作台」当前做到了哪一步：三端功能对照、云同步与数据库、隐私合规、发布方式、遗留事项。
 > 更细的代码级说明见 [docs/wiki](wiki/README.md)。
 
 ## 1. 两端形态
@@ -9,6 +9,7 @@
 | --- | --- | --- | --- |
 | 网页版 | 仓库根目录 `index.html` / `style.css` / `app.js` | 原生 HTML/CSS/JS，零构建 | GitHub Pages（推 `main` 自动发布） |
 | 微信小程序 | `miniapp/` | Taro 4.1.9 + React 18 + TypeScript（designWidth 375） | 微信公众平台 · 开发版（当前 1.1.8，待手动设为体验版） |
+| 桌面小组件 | `plugins/study-widget/` | DSH 插件 + Electron 无边框窗口，只读同一份 Supabase 数据 | 本机（DSH profile `desktop` 的 link 依赖） |
 
 两端共用同一套数据结构和云同步协议，数据默认只存本机，开启云同步后可互相同步。
 
@@ -72,7 +73,6 @@
 - 发布前需在微信后台「用户隐私保护指引」声明剪切板用途；完整文案已提供，可放在 `docs/` 或小程序内说明页。
 
 ## 5. 发布与更新
-
 ### 小程序
 
 1. `cd miniapp && npm run build:weapp`
@@ -84,7 +84,7 @@
 3. 上传体验版时用 `miniprogram-ci` 的 `ci.upload`（上传密钥同上）；微信公众平台 → 管理 → 版本管理：设为体验版（自用）；要对外则提交审核 → 发布
 4. 服务器域名需加入：云函数 URL 域名、`https://api.bilibili.com`
 5. 仓库里的 `project.config.json` 用占位 AppID，真实 AppID 在本机被忽略的 `project.private.config.json`
-6. 动效改动必须遵守 [08 动效开发规范](wiki/08-motion-standards.md)（门禁 + 验收清单）；小程序端材质/层级/自定义 tabBar/闪烁等约定见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md)（含踩坑日志，强制）
+6. 动效改动必须遵守 [08 动效开发规范](wiki/08-motion-standards.md)（门禁 + 验收清单）；小程序端材质/层级/自定义 tabBar/闪烁等约定见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md)（含踩坑日志，强制）；插件与桌面端见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md)
 
 ### 网页版
 
@@ -109,7 +109,11 @@ study-dashboard/
 ├── index.html / style.css / app.js     网页版（唯一页面 + 全部逻辑）
 ├── docs/
 │   ├── PROJECT-STATUS.md               本文档
-│   └── wiki/                           代码级文档（架构、数据、UI、云同步、部署）
+│   └── wiki/                           代码级文档（架构、数据、UI、云同步、部署、插件）
+├── plugins/                            DSH 插件（每个子目录一个 @local/* 包）
+│   └── study-widget/                   学业工作台桌面小组件：桌面小窗 / 侧栏面板 / 助手工具
+│       ├── scripts/smoke.mjs           15 项冒烟自测，零依赖、不启动 DSH
+│       └── docs/shots/                 交付用界面截图
 ├── supabase/
 │   ├── schema.sql                      主表 + RLS + Realtime
 │   └── history.sql                     历史归档表 + 触发器
@@ -126,6 +130,9 @@ study-dashboard/
 
 ## 7. 近期已完成
 
+- **桌面小组件插件（本机已安装）**：`plugins/study-widget/` 把学习进度做成 DSH 里的常驻桌面小窗（Electron 无边框、置顶、记住位置），
+  同时提供右侧栏面板、`study_widget_progress` 助手工具与 `/study` 命令；统计口径与网页版逐项对齐，断网回落本地快照。
+  详见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md)。当前显示的是演示数据，填好 `~/.dsh/study-widget/login.json` 后切到真实账号。
 - **1.1.8（已上传，开发版）**：Apple 液态玻璃界面与自定义胶囊底栏、弹层打开隐藏底栏、弹窗退场/操作反馈/页面切换显影动画、弹窗加透、打卡当天可累加按天去重、导航栏标题兜底、日历红框标记待办与打卡。详见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md) 的踩坑日志。
 - **1.1.7（已上传）**：学习页热力图与日历页月历用红框标记待办 / 完成 / 打卡。
 - **示例数据功能下线**：填入 / 清除示例入口及相关函数已删除，遗留字段读入时自动剔除；两端文档已同步更正。

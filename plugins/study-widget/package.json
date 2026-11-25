@@ -1,0 +1,37 @@
+{
+  "name": "@local/dsh-study-widget",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "学业工作台桌面小组件：DSH 侧栏标签页 + 独立置顶桌面小窗，展示学习进度、待办、打卡与热力图。",
+  "license": "MIT",
+  "icon": "./assets/icon.png",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./assets/icon.png"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/",
+    "desktop/",
+    "assets/",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  }
+}

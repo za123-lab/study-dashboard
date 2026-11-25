@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学业工作台 · 桌面小组件</title>
+  <link rel="stylesheet" href="./widget.css" />
+</head>
+<body data-mode="widget">
+  <div id="root" class="app" data-state="loading">
+    <header class="bar" id="bar">
+      <div class="bar-left">
+        <span class="dot" id="sourceDot" title="数据来源"></span>
+        <span class="bar-title">学业工作台</span>
+      </div>
+      <div class="bar-actions">
+        <button class="icon-btn" id="btnRefresh" title="刷新数据" aria-label="刷新数据">⟳</button>
+        <button class="icon-btn" id="btnPin" title="置顶开关" aria-label="置顶开关">📌</button>
+        <button class="icon-btn" id="btnMin" title="隐藏窗口" aria-label="隐藏窗口">–</button>
+        <button class="icon-btn" id="btnClose" title="退出小组件" aria-label="退出小组件">×</button>
+      </div>
+    </header>
+
+    <main class="body" id="body">
+      <p class="loading-hint">正在读取学习进度…</p>
+    </main>
+
+    <footer class="foot" id="foot">
+      <span id="footText">—</span>
+      <button class="link-btn" id="btnOpen">打开网页版</button>
+    </footer>
+  </div>
+  <script src="./widget.js"></script>
+</body>
+</html>

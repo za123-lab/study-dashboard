@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Study Dashboard desktop widget",
+    "description": "Shows study progress, today's todos, check-ins and a heatmap in a DSH sidebar tab and a standalone always-on-top desktop window."
+  }
+}

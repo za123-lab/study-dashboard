@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-study-widget
+      name: '@local/dsh-study-widget'
