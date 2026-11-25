@@ -169,9 +169,83 @@ export function createDesktopLauncher(ctx, settings) {
     };
   }
 
+  /**
+   * 设置页/接口要的聚合快照。
+   * - bounds：window.json（6 条写盘路径共同维护；文件缺失/半截 JSON 一律当无记录，返回 null）
+   * - pinned：settings.json 的 desktop.alwaysOnTop（「上次保存的意图」，不是实时值）
+   * - pinnedSource：live（界面直接问过渲染进程）/ settings（来自设置文件）/ unknown
+   * - running：进程是否还活着
+   */
+  async function info() {
+    const paths = credentialPaths();
+    let bounds = null;
+    try {
+      const saved = await readJson(paths.windowState);
+      if (saved && Number.isFinite(saved.width) && Number.isFinite(saved.height)) {
+        bounds = {
+          x: Number(saved.x),
+          y: Number(saved.y),
+          width: Number(saved.width),
+          height: Number(saved.height),
+        };
+      }
+    } catch {
+      bounds = null;
+    }
+    let pinned = null;
+    let pinnedSource = "unknown";
+    try {
+      const raw = await readJson(path.join(paths.home, "settings.json"));
+      const value = raw && raw.desktop ? raw.desktop.alwaysOnTop : undefined;
+      if (typeof value === "boolean") {
+        pinned = value;
+        pinnedSource = "settings";
+      }
+    } catch {
+      pinned = null;
+    }
+    return {
+      running: alive(),
+      bounds,
+      pinned,
+      pinnedSource,
+      error: lastError,
+      execPath,
+      live: alive(),
+    };
+  }
+
+  /**
+   * 隐藏窗口。Electron 子进程没有进程内控制通道，这里退化为 stop()：
+   * before-quit 已冲刷 window.json，所以下次打开仍在原位，无副作用。
+   */
+  async function hide() {
+    if (!alive()) return { ok: false, error: "窗口未运行", code: "NO_HIDE" };
+    stop();
+    return { ok: true, mode: "stop" };
+  }
+
+  /**
+   * 置顶。Host 侧无法直接调渲染进程 IPC，这里只把意图写进 settings.json；
+   * 运行时切换由设置页/小组件页直接调 window.studyWidget.setAlwaysOnTop() 完成。
+   */
+  async function setPinned(value) {
+    const wanted = !!value;
+    const settingsFile = path.join(credentialPaths().home, "settings.json");
+    try {
+      const raw = (await readJson(settingsFile)) || {};
+      const desktopCfg = Object.assign({}, raw.desktop || {}, { alwaysOnTop: wanted });
+      raw.desktop = desktopCfg;
+      await writeJson(settingsFile, raw);
+      return { ok: true, applied: "persisted", pinned: wanted, pinnedSource: "settings" };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), code: "NO_PIN" };
+    }
+  }
+
   function dispose() {
     stop();
   }
 
-  return { open, stop, status, saveBounds, dispose, alive };
+  return { open, stop, status, saveBounds, dispose, alive, info, hide, setPinned };
 }

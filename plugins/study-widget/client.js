@@ -12,6 +12,8 @@
   const PLUGIN_ID = "@local/dsh-study-widget";
   const TAB_ID = "dsh-study-widget";
   const TAB_KIND = "study-widget";
+  /** 左栏一级入口的 id，同时是主区 main 槽的 key —— 两处必须逐字一致，否则点开入口会抛错 */
+  const PANEL_ID = "dsh-study-widget";
   const ROUTE_PATH = "/dsh-study-widget/";
   const inject = ["slots", "locale"];
 
@@ -27,6 +29,9 @@
       const dictZh = {
         tabTitle: "学习进度",
         tabGuide: "查看学业工作台的今日学习、总进度、待办与打卡",
+        panelLabel: "学业工作台",
+        settings: "设置",
+        navData: "进度",
         loading: "正在载入学习数据…",
         refresh: "刷新",
         openDesktop: "桌面小窗",
@@ -41,6 +46,9 @@
       const dictEn = {
         tabTitle: "Study progress",
         tabGuide: "Today's study, overall progress, todos and check-ins",
+        panelLabel: "Study dashboard",
+        settings: "Settings",
+        navData: "Progress",
         loading: "Loading study data…",
         refresh: "Refresh",
         openDesktop: "Desktop window",
@@ -131,6 +139,48 @@
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, inherit);
 }
+/* 顶栏分段控件：数据页 / 设置页。等宽相连，当前页高亮 */
+.sw-seg {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.3));
+  border-radius: 7px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.sw-seg > button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, inherit);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 2px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.sw-seg > button + button {
+  border-left: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.3));
+}
+.sw-seg > button:hover {
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.sw-seg > button[aria-selected="true"] {
+  background: var(--dsw-alias-bg-layer-3, rgba(128,128,128,0.16));
+  color: var(--dsw-alias-label-primary, inherit);
+  font-weight: 600;
+}
+.sw-btn .sw-ic,
+.sw-seg .sw-ic {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  display: block;
+}
 `;
 
       let cssOwner = null;
@@ -168,10 +218,51 @@
         return prefix + ROUTE_PATH;
       }
 
+      /** 顶栏小图标：一律内联 SVG、跟随 currentColor，不用 emoji */
+      function barIcon(path, size) {
+        return h(
+          "svg",
+          {
+            className: "sw-ic",
+            width: size || 12,
+            height: size || 12,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            "aria-hidden": "true",
+            focusable: "false",
+          },
+          path
+        );
+      }
+      const ICON_PIN = [
+        h("path", { key: "a", d: "M15 3.8 20.2 9l-3.1.8-3.4 3.4-.5 3.9-1.6 1.6-6.9-6.9 1.6-1.6 3.9-.5L14.2 6 15 3.8Z", stroke: "currentColor", strokeWidth: "1.6", strokeLinejoin: "round" }),
+        h("path", { key: "b", d: "M9.2 14.8 4 20", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round" }),
+      ];
+      const ICON_REFRESH = [
+        h("path", { key: "a", d: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round" }),
+        h("path", { key: "b", d: "M19.6 4.2v4.4h-4.4", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round" }),
+      ];
+      const ICON_GEAR = [
+        h("circle", { key: "a", cx: "12", cy: "12", r: "3.1", stroke: "currentColor", strokeWidth: "1.6" }),
+        h("path", {
+          key: "b",
+          d: "M12 3.3v2.1M12 18.6v2.1M4.7 7.9l1.8 1M17.5 15.1l1.8 1M4.7 16.1l1.8-1M17.5 8.9l1.8-1",
+          stroke: "currentColor",
+          strokeWidth: "1.6",
+          strokeLinecap: "round",
+        }),
+      ];
+      const ICON_CHART = [
+        h("path", { key: "a", d: "M4 19.5h16", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round" }),
+        h("path", { key: "b", d: "M7 16V11M12 16V6.5M17 16v-3", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round" }),
+      ];
+
       function makePanel(ctx, t) {
         return function StudyWidgetPanel() {
           const frameRef = react.useRef(null);
           const [nonce, setNonce] = react.useState(0);
+          /** "data" = 学习数据页， "settings" = 设置页；同一 iframe 内切换，不新开窗口 */
+          const [view, setView] = react.useState("data");
           react.useEffect(
             function () {
               if (cssOwner === null) cssOwner = injectCss("panel", PANEL_CSS);
@@ -184,42 +275,75 @@
             },
             []
           );
-          const src = routeUrl() + "?mode=panel&v=" + nonce;
+          const base = routeUrl();
+          const src =
+            view === "settings"
+              ? base + "settings?v=" + nonce
+              : base + "?mode=panel&v=" + nonce;
+          const title = view === "settings" ? t("settings") : t("tabTitle");
           return jsxs("div", {
             className: "sw-panel-host",
             children: [
               jsxs("div", {
                 className: "sw-bar",
                 children: [
-                  jsx("span", { className: "sw-bar-title", children: t("tabTitle") }),
-                  jsx("button", {
-                    type: "button",
-                    className: "sw-btn",
-                    title: t("openDesktopTip"),
-                    onClick: function () {
-                      const frame = frameRef.current;
-                      if (frame && frame.contentWindow) {
-                        frame.contentWindow.postMessage({ type: "study-widget:open-desktop" }, "*");
-                      }
-                    },
-                    children: "📌 " + t("openDesktop"),
+                  jsx("span", { className: "sw-bar-title", children: title }),
+                  jsxs("div", {
+                    className: "sw-seg",
+                    role: "tablist",
+                    "aria-label": t("panelLabel"),
+                    children: [
+                      jsx("button", {
+                        type: "button",
+                        role: "tab",
+                        "aria-selected": view === "data" ? "true" : "false",
+                        onClick: function () {
+                          setView("data");
+                        },
+                        children: [barIcon(ICON_CHART), t("navData")],
+                      }),
+                      jsx("button", {
+                        type: "button",
+                        role: "tab",
+                        "aria-selected": view === "settings" ? "true" : "false",
+                        onClick: function () {
+                          setView("settings");
+                        },
+                        children: [barIcon(ICON_GEAR), t("settings")],
+                      }),
+                    ],
                   }),
+                  view === "data"
+                    ? jsx("button", {
+                        type: "button",
+                        className: "sw-btn",
+                        title: t("openDesktopTip"),
+                        onClick: function () {
+                          const frame = frameRef.current;
+                          if (frame && frame.contentWindow) {
+                            frame.contentWindow.postMessage({ type: "study-widget:open-desktop" }, "*");
+                          }
+                        },
+                        children: [barIcon(ICON_PIN), t("openDesktop")],
+                      })
+                    : null,
                   jsx("button", {
                     type: "button",
                     className: "sw-btn",
+                    title: t("refresh"),
                     onClick: function () {
                       setNonce(function (n) {
                         return n + 1;
                       });
                     },
-                    children: t("refresh"),
+                    children: [barIcon(ICON_REFRESH), t("refresh")],
                   }),
                 ],
               }),
               jsx("iframe", {
                 ref: frameRef,
                 className: "sw-frame",
-                title: t("tabTitle"),
+                title: title,
                 src: src,
                 allow: "clipboard-read; clipboard-write",
               }),
@@ -228,9 +352,87 @@
         };
       }
 
+      /** 左栏一级入口的图标：16px 时给 16，收起态给 18；跟随 currentColor 与主题 */
+      function StudyPanelIcon(props) {
+        const size = props && Number(props.size) > 0 ? Number(props.size) : 16;
+        return h(
+          "svg",
+          {
+            width: size,
+            height: size,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            "aria-hidden": "true",
+            focusable: "false",
+          },
+          h("path", {
+            d: "M4 19.5V5.5A1.5 1.5 0 0 1 5.5 4H13v16H5.5A1.5 1.5 0 0 0 4 21.5",
+            stroke: "currentColor",
+            strokeWidth: "1.7",
+            strokeLinejoin: "round",
+          }),
+          h("path", {
+            d: "M13 4h5.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13",
+            stroke: "currentColor",
+            strokeWidth: "1.7",
+            strokeLinejoin: "round",
+          }),
+          h("path", {
+            d: "M6.5 9.5h4M6.5 13h4M15.5 8.5h2M15.5 12h2",
+            stroke: "currentColor",
+            strokeWidth: "1.5",
+            strokeLinecap: "round",
+          })
+        );
+      }
+
       function apply(ctx) {
         const t = localeOf(ctx);
         const Panel = makePanel(ctx, t);
+        // 左栏一级入口 + 主区整页（设置页）：两边用同一个 PANEL_ID 寻址
+        ctx.effect(
+          function () {
+            const disposeMain = ctx.slots.inject("main", function* () {
+              yield ctx.slots.register(
+                {
+                  name: "main",
+                  key: PANEL_ID,
+                  locale: LOCALE_NS,
+                },
+                function MainPanel() {
+                  return h(Panel, {});
+                }
+              );
+            });
+            const disposeEntry = ctx.slots.inject("sidebar.panellist", function* () {
+              yield ctx.slots.register(
+                {
+                  name: "sidebar.panellist",
+                  id: PANEL_ID,
+                  order: 30,
+                  locale: LOCALE_NS,
+                  label: function () {
+                    return t("panelLabel");
+                  },
+                },
+                StudyPanelIcon
+              );
+            });
+            return function () {
+              try {
+                disposeEntry && disposeEntry();
+              } catch {
+                /* 忽略 */
+              }
+              try {
+                disposeMain && disposeMain();
+              } catch {
+                /* 忽略 */
+              }
+            };
+          },
+          "study-widget: left panel entry"
+        );
         ctx.effect(
           function () {
             const tabs = ctx.get("sidebarRightTabs");

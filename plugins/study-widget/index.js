@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { StudySource } from "./lib/source.js";
 import { buildSummary } from "./lib/summary.js";
 import { createDesktopLauncher } from "./lib/desktop.js";
+import { createSettingsRoutes } from "./lib/settings-routes.js";
+import { SettingsStore } from "./lib/settings.js";
 
 export const name = "study-widget";
 
@@ -38,6 +40,7 @@ export function apply(ctx, config) {
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   const cache = { summary: null, at: 0 };
   const waiters = new Map();
+  const settingsStore = new SettingsStore();
 
   const webServer = ctx.get("webServer");
   const originProvider = function () {
@@ -61,6 +64,31 @@ export function apply(ctx, config) {
     },
   });
 
+  /**
+   * 设置页/接口层：托管 /api/settings、/api/desktop、/api/plugin、/api/sources。
+   * 必须在 desktop / settingsStore 定义之后创建：对象字面量参数会立即求值，顺序反了就是 TDZ，
+   * 被 try/catch 吞掉后设置页整组接口会全部 404。
+   * pluginManager 传函数而不是对象，因为服务可能比本插件晚挂载。
+   */
+  const settingsRoutes = (function () {
+    try {
+      return createSettingsRoutes({
+        source,
+        desktop,
+        pluginManager: function () {
+          return ctx.get("pluginManager");
+        },
+        sendJson,
+        sendText,
+        authorized,
+        settings: settingsStore,
+      });
+    } catch (err) {
+      logger.warn && logger.warn("settings routes 初始化失败，设置页将不可用：" + ((err && err.message) || err));
+      return null;
+    }
+  })();
+
   async function readData(force) {
     return source.read({ stateFile: cfg.stateFile, offline: !!cfg.offline, force: force }).then(
       function (row) {
@@ -69,9 +97,26 @@ export function apply(ctx, config) {
     );
   }
 
+    /**
+   * 快照缓存秒数：设置页的 refresh.summaryTtlSeconds（0 = 每次都读云端）。
+   * 设置读不出来一律回落 30 秒——设置问题不能把数据接口打挂。
+   */
+  async function summaryTtlMs() {
+    try {
+      if (settingsRoutes && typeof settingsRoutes.ttlSeconds === "function") {
+        const seconds = await settingsRoutes.ttlSeconds();
+        return Math.max(0, Number(seconds) || 0) * 1000;
+      }
+    } catch {
+      /* 回落常量 */
+    }
+    return SUMMARY_TTL_MS;
+  }
+
   /** 读一次并组装快照；同刻并发请求共享一次读取 */
   async function summary(force) {
-    if (!force && cache.summary && Date.now() - cache.at < SUMMARY_TTL_MS) {
+    const ttlMs = await summaryTtlMs();
+    if (!force && cache.summary && ttlMs > 0 && Date.now() - cache.at < ttlMs) {
       return { summary: cache.summary, status: source.status() };
     }
     if (waiters.has("load")) return waiters.get("load");
@@ -172,6 +217,12 @@ export function apply(ctx, config) {
       return;
     }
 
+    // 设置/桌面/插件/数据源这几组接口由 lib/settings-routes.js 独占，不认识的原路返回 false
+    if (settingsRoutes) {
+      const handled = await settingsRoutes(req, res, rel, url);
+      if (handled) return;
+    }
+
     if (rel === "/api/summary" || rel === "/api/summary.json") {
       try {
         const out = await summary(url.searchParams.get("refresh") === "1");
@@ -245,6 +296,12 @@ export function apply(ctx, config) {
 
     if (rel === "/" || rel === "" || rel === "/index.html") {
       await serveAsset(res, "widget.html");
+      return;
+    }
+
+    // 设置页：/settings 与 /settings/ 都指向同一个自包含页面（它自带 ./settings.css、./settings.js）
+    if (rel === "/settings" || rel === "/settings/" || rel === "/settings.html") {
+      await serveAsset(res, "settings.html");
       return;
     }
     await serveAsset(res, rel.replace(/^\/+/, ""));

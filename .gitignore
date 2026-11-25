@@ -1,5 +1,6 @@
 .screenshots/
 .trae-html-share-packages/
+.trae/
 .DS_Store
 Thumbs.db
 *.log

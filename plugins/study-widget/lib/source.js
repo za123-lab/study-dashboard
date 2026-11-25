@@ -1,27 +1,31 @@
 /**
  * 数据源：按网页端的优先级读取整份进度。
  *
- *   1. 手工指定的本地文件（pluginConfig.stateFile）—— 便于离线/调试
+ *   1. 手工指定的本地文件（设置里的 data.stateFile，或 pluginConfig.stateFile）—— 便于离线/调试
  *   2. Supabase：Auth 登录 → PostgREST 读自己那一行（与网页端同一套协议）
- *   3. 上一次成功读到的快照（磁盘缓存，断网时兜底）
+ *   3. 上一次成功读到的快照（磁盘缓存 latest.json，断网时兜底）
  *
  * 顺序与网页端一致：本机优先，云端其次；本插件只读，不写云端。
  *
- * 凭据文件（默认 ~/.dsh/study-widget/login.json，可用 DSH_STUDY_WIDGET_HOME 改根目录）：
- *   {
- *     "url": "https://xxxx.supabase.co",
- *     "anonKey": "eyJ...",
- *     "email": "you@example.com",
- *     "password": "••••••"
- *   }
- * 也支持直接用 accessToken / refreshToken（网页端 localStorage 里那份），
- * 以及 robots-friendly 的 "passwordCommand"（执行命令取密码）。
+ * 凭据来源（两处，设置优先）：
+ *   a. 设置文件 ~/.dsh/study-widget/settings.json 的 supabase 分区（设置页填的，含 password）
+ *   b. 老式凭据文件 ~/.dsh/study-widget/login.json（手工写的；决定迁移后仍可继续用）
+ *   两边都没有时会提示「去设置页填 Supabase」。
+ *
+ * login.json 结构（向下兼容，仍可用）：
+ *   { "url": "https://xxxx.supabase.co", "anonKey": "eyJ...", "email": "you@example.com", "password": "••••••" }
+ * 也支持 accessToken / refreshToken（网页端 localStorage 里那份）、passwordCommand（执行命令取密码）。
+ *
+ * 根目录可用 DSH_STUDY_WIDGET_HOME 改；state.json 是网页端「监听本地文件」那条链路留下的快照。
  */
 import { spawn as nodeSpawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { createClient } from "./supabase.js";
+
+/** 凭据/Http 细节统一走 lib/supabase.js，这里只做「读哪儿、回退到哪儿」 */
 const TIMEOUT_MS = 15000;
 
 export function widgetHome() {
@@ -37,6 +41,7 @@ export function credentialPaths() {
   return {
     home,
     login: path.join(home, "login.json"),
+    settings: path.join(home, "settings.json"),
     state: path.join(home, "state.json"),
     latest: path.join(home, "latest.json"),
     windowState: path.join(home, "window.json"),
@@ -69,50 +74,7 @@ async function removeFile(file) {
 }
 
 function normalizeUrl(raw) {
-  let url = String(raw == null ? "" : raw).trim().replace(/\/+$/, "");
-  if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
-  return url;
-}
-
-function authErrorText(status, text) {
-  const s = String(text || "");
-  if (/invalid login credentials/i.test(s)) return "邮箱或密码不对";
-  if (/email not confirmed/i.test(s)) return "邮箱还没验证：请在 Supabase 控制台确认这个用户";
-  if (/invalid refresh token|refresh token.*(expired|not found)/i.test(s)) return "登录已过期，请重新登录";
-  if (status === 429) return "尝试太频繁，等几分钟再试";
-  if (status === 404) return "接口地址不对：检查 Supabase 项目 URL";
-  return "登录失败：" + (s || "HTTP " + status);
-}
-
-function restErrorText(status, body) {
-  if (body && body.code === "42P01") return "云端还没有建表：请先执行 supabase/schema.sql";
-  if (body && body.code === "42501") return "没有权限：确认 schema.sql 里的 RLS 策略已执行";
-  if (status === 401) return "登录已失效";
-  if (status === 403) return "没有权限读取自己的数据（检查 RLS 策略）";
-  const detail = (body && (body.msg || body.message || body.details || body.hint)) || "";
-  return detail || "HTTP " + status;
-}
-
-async function timedFetch(url, options) {
-  const controller = new AbortController();
-  const timer = setTimeout(function () {
-    controller.abort();
-  }, TIMEOUT_MS);
-  try {
-    return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function readBody(res) {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  return String(raw == null ? "" : raw).trim().replace(/\/+$/, "");
 }
 
 async function passwordFrom(cred) {
@@ -132,32 +94,108 @@ async function passwordFrom(cred) {
   });
 }
 
-function sessionFromAuth(body) {
-  if (!body || typeof body.access_token !== "string" || !body.user) {
-    throw new Error("登录响应不完整，没有拿到 token");
-  }
+/** 把一份 state 统一成 { data, rev, updatedAt }（兼容 {data,rev,updated_at} 包裹与裸 state） */
+export function unwrapState(raw, extra) {
+  const e = extra || {};
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw.data && !Array.isArray(raw.courses) ? raw.data : raw;
   return {
-    accessToken: body.access_token,
-    refreshToken: typeof body.refresh_token === "string" ? body.refresh_token : "",
-    expiresAt: Date.now() + (Number(body.expires_in) || 3600) * 1000,
-    userId: String(body.user.id || ""),
-    email: String(body.user.email || ""),
+    data,
+    rev: Number(raw.rev != null ? raw.rev : e.rev) || 0,
+    updatedAt: String(raw.updated_at || raw.updatedAt || raw.syncedAt || e.updatedAt || ""),
   };
 }
 
 export class StudySource {
-  constructor() {
+  /**
+   * @param {object} [options]
+   * @param {object} [options.store] 注入 SettingsStore（测试用）；缺省在需要时懒加载
+   */
+  constructor(options) {
+    const opts = options || {};
     this.session = null;
     this.cache = null; // { data, rev, updatedAt, source, email, fetchedAt }
     this.lastError = null;
+    this.client = null;
+    this.clientKey = "";
+    this.storePromise = opts.store ? Promise.resolve(opts.store) : null;
   }
 
+  /** 懒加载 SettingsStore：只依赖 lib/settings.js 导出，循环依赖由 ESM 处理 */
+  async settingsStore() {
+    if (!this.storePromise) {
+      this.storePromise = import("./settings.js").then(function (mod) {
+        return new mod.SettingsStore();
+      });
+    }
+    return this.storePromise;
+  }
+
+  /** 读设置（读失败不炸：设置文件坏了就回落到 login.json） */
+  async settings() {
+    try {
+      const store = await this.settingsStore();
+      await store.load();
+      const raw = store.raw();
+      // load() 会把 login.json 里的 url/anonKey 并进视图（兼容老用户）：
+      // 这种「迁移来的」凭据来源仍是 login.json，回写 refresh token 也要回 login.json
+      raw.migratedFromLogin = !!store.migratedFromLogin;
+      this.settingsSnapshot = raw;
+      return raw;
+    } catch (err) {
+      this.lastError = err;
+      return null;
+    }
+  }
+
+  /** 凭据优先级：settings.json 的 supabase 有 url+anonKey → 用它；否则 login.json */
   async loadCredentials() {
     const paths = credentialPaths();
+
+    let settings = null;
+    try {
+      settings = await this.settings();
+    } catch {
+      settings = null;
+    }
+    const fromSettings = settings && settings.supabase ? settings.supabase : null;
+    const migrated = !!(settings && settings.migratedFromLogin);
+    if (fromSettings && fromSettings.url && fromSettings.anonKey) {
+      return {
+        url: normalizeUrl(fromSettings.url),
+        anonKey: String(fromSettings.anonKey || "").trim(),
+        email: fromSettings.email || "",
+        password: fromSettings.password || "",
+        refreshToken: fromSettings.refreshToken || "",
+        // 迁移来的凭据等于老路径：标 login，refresh token 也回写 login.json
+        source: migrated ? "login" : "settings",
+        path: paths.settings,
+        raw: {
+          url: fromSettings.url,
+          anonKey: fromSettings.anonKey,
+          email: fromSettings.email,
+          password: fromSettings.password,
+          refreshToken: fromSettings.refreshToken,
+        },
+      };
+    }
+
     const cred = await readJson(paths.login);
     if (!cred || typeof cred !== "object") {
+      // 设置里只填了一半也算「配置了」：报缺少的字段比「什么都没有」更好定位
+      if (fromSettings && (fromSettings.url || fromSettings.anonKey)) {
+        const err = new Error(
+          "Supabase 设置不完整：请到 DSH「学业工作台 → 设置 → 连接」补全 URL 与 anonKey。"
+        );
+        err.code = "BAD_CREDENTIALS";
+        err.path = paths.settings;
+        throw err;
+      }
       const err = new Error(
-        "还没有配置 Supabase 登录信息。请在 " + paths.login + " 填写 { url, anonKey, email, password }。"
+        "还没有配置 Supabase。请在 DSH 的「学业工作台 → 设置 → 连接」里填写 URL / anonKey / 邮箱 / 密码，" +
+          "或直接编辑 " +
+          paths.login +
+          "。"
       );
       err.code = "NO_CREDENTIALS";
       err.path = paths.login;
@@ -171,52 +209,45 @@ export class StudySource {
       err.path = paths.login;
       throw err;
     }
-    return { url, anonKey, email: cred.email || "", raw: cred };
+    return { url, anonKey, email: cred.email || "", source: "login", path: paths.login, raw: cred };
   }
 
-  async authenticate(cred) {
-    if (this.session && this.session.url === cred.url && this.session.expiresAt - 120000 > Date.now()) {
-      return this.session;
-    }
-    if (
-      this.session &&
-      this.session.url === cred.url &&
-      this.session.refreshToken &&
-      this.session.userId
-    ) {
-      try {
-        return await this.refresh(cred, this.session.refreshToken);
-      } catch {
-        this.session = null;
-      }
-    }
-    const password = await passwordFrom(cred.raw);
-    if (!password) {
-      const err = new Error("凭据文件里没有 password（或 passwordCommand 没输出密码）");
-      err.code = "NO_PASSWORD";
-      throw err;
-    }
-    const res = await timedFetch(cred.url + "/auth/v1/token?grant_type=password", {
-      method: "POST",
-      headers: { apikey: cred.anonKey, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ email: cred.email, password }),
+  /** 同一个 (url, anonKey, 账号, 密码) 复用同一个客户端，避免重复建对象与丢 session */
+  getClient(cred) {
+    const password = String(cred.raw.password || cred.password || "");
+    const key = [cred.url, cred.anonKey, cred.email, password, cred.refreshToken || cred.raw.refreshToken || ""].join("\u0000");
+    if (this.client && this.clientKey === key) return this.client;
+    this.clientKey = key;
+    this.client = createClient({
+      url: cred.url,
+      anonKey: cred.anonKey,
+      email: cred.email,
+      password: password,
+      refreshToken: cred.refreshToken || cred.raw.refreshToken || "",
     });
-    const body = await readBody(res);
-    if (!res.ok) {
-      const err = new Error(authErrorText(res.status, body && (body.msg || body.error_description || body.error || body.message)));
-      err.code = "AUTH_FAILED";
-      throw err;
-    }
-    const session = sessionFromAuth(body);
-    session.url = cred.url;
-    session.anonKey = cred.anonKey;
-    this.session = session;
-    await this.persistSession(cred, session);
-    return session;
+    return this.client;
   }
 
+  /** 登录（保留旧签名，内部交给 supabase 客户端） */
+  async authenticate(cred) {
+    const client = this.getClient(cred);
+    const session = await client.signIn();
+    this.session = Object.assign({ url: cred.url, anonKey: cred.anonKey }, session);
+    return this.session;
+  }
+
+  /** 登录成功后把 refresh token 回写：设置在 → settings.json；否则老路径 login.json */
   async persistSession(cred, session) {
-    // 只把 refresh token 存回去，避免密码折腾；文件不存在就新建
+    if (!session || !session.refreshToken) return;
+    if (cred.source === "settings") {
+      try {
+        const store = await this.settingsStore();
+        await store.saveTokens({ refreshToken: session.refreshToken, userId: session.userId });
+      } catch {
+        /* 设置文件只读时忽略：下次用密码重新登录 */
+      }
+      return;
+    }
     try {
       const paths = credentialPaths();
       const existing = (await readJson(paths.login)) || {};
@@ -227,89 +258,82 @@ export class StudySource {
   }
 
   async refresh(cred, refreshToken) {
-    const res = await timedFetch(cred.url + "/auth/v1/token?grant_type=refresh_token", {
-      method: "POST",
-      headers: { apikey: cred.anonKey, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    const body = await readBody(res);
-    if (!res.ok) {
-      const err = new Error(authErrorText(res.status, body && (body.msg || body.error_description || body.message)));
-      err.code = "REFRESH_FAILED";
-      throw err;
-    }
-    const session = sessionFromAuth(body);
-    session.url = cred.url;
-    session.anonKey = cred.anonKey;
-    this.session = session;
+    const client = this.getClient(cred);
+    const session = await client.refreshSession(refreshToken);
+    this.session = Object.assign({ url: cred.url, anonKey: cred.anonKey }, session);
     await this.persistSession(cred, session);
-    return session;
+    return this.session;
   }
 
   async fetchRemote(cred) {
-    let session = await this.authenticate(cred);
-    const request = async function () {
-      return timedFetch(
-        cred.url +
-          "/rest/v1/study_state?user_id=eq." +
-          encodeURIComponent(session.userId) +
-          "&select=data,rev,updated_at",
-        {
-          method: "GET",
-          headers: {
-            apikey: cred.anonKey,
-            Authorization: "Bearer " + session.accessToken,
-            Accept: "application/json",
-          },
-        }
-      );
-    };
-    let res = await request();
-    if (res.status === 401 && session.refreshToken) {
-      session = await this.refresh(cred, session.refreshToken);
-      res = await request();
+    // 老式 login.json 里的 passwordCommand：先算出密码，再交给纯 HTTP 客户端
+    if (cred.source !== "settings" && !cred.raw.password && cred.raw.passwordCommand) {
+      const password = await passwordFrom(cred.raw);
+      if (!password) {
+        const err = new Error("凭据文件里没有 password（或 passwordCommand 没输出密码）");
+        err.code = "NO_PASSWORD";
+        throw err;
+      }
+      cred.raw = Object.assign({}, cred.raw, { password });
+      this.clientKey = "";
     }
-    if (!res.ok) {
-      const body = await readBody(res);
-      const err = new Error(restErrorText(res.status, body));
-      err.code = "REST_FAILED";
-      throw err;
-    }
-    const rows = await readBody(res);
-    const row = Array.isArray(rows) ? rows[0] : null;
-    if (!row || !row.data) {
-      const err = new Error("云端还没有进度数据（先在网页端开启云同步推一次）");
-      err.code = "EMPTY_REMOTE";
-      throw err;
-    }
-    return { data: row.data, rev: row.rev || 0, updatedAt: row.updated_at || "", email: session.email };
+    const client = this.getClient(cred);
+    const remote = await client.fetchState();
+    await this.persistSession(cred, remote.session);
+    return { data: remote.data, rev: remote.rev, updatedAt: remote.updatedAt, email: remote.email };
   }
 
-  /** 读取一次最新数据；成功时写缓存，失败时回退到缓存 */
+  /** 本地文件数据源：设置里的 data.stateFile 优先，其次 pluginConfig.stateFile */
+  async readStateFile(file, label, paths) {
+    const abs = path.resolve(file);
+    const raw = await readJson(abs);
+    if (!raw) return null;
+    const unwrapped = unwrapState(raw);
+    if (!unwrapped) return null;
+    this.cache = {
+      data: unwrapped.data,
+      rev: unwrapped.rev,
+      updatedAt: unwrapped.updatedAt,
+      source: label || "file",
+      email: "",
+      fetchedAt: Date.now(),
+      file: abs,
+    };
+    this.lastError = null;
+    await writeJson(paths.latest, this.cache).catch(function () {});
+    return this.cache;
+  }
+
+  /**
+   * 读取一次最新数据；成功时写缓存，失败时回退到缓存。
+   * @param {object} [config] { stateFile?, offline? }（pluginConfig 的旧口径，设置优先）
+   */
   async read(config) {
     const cfg = config || {};
     const paths = credentialPaths();
 
-    if (cfg.stateFile) {
-      const raw = await readJson(path.resolve(cfg.stateFile));
-      if (raw) {
-        const data = raw && raw.data && !raw.courses ? raw.data : raw;
-        this.cache = {
-          data,
-          rev: Number(raw && raw.rev) || 0,
-          updatedAt: raw && raw.updated_at ? raw.updated_at : "",
-          source: "file",
-          email: "",
-          fetchedAt: Date.now(),
-          file: path.resolve(cfg.stateFile),
-        };
-        this.lastError = null;
-        await writeJson(paths.latest, this.cache).catch(function () {});
-        return this.cache;
+    // 设置里的 data.stateFile / data.offline 优先，其次插件配置
+    const settings = await this.settings();
+    const dataCfg = (settings && settings.data) || {};
+    const stateFile = dataCfg.stateFile || cfg.stateFile || "";
+    const offline = dataCfg.offline !== undefined ? !!dataCfg.offline : !!cfg.offline;
+
+    if (stateFile) {
+      try {
+        const hit = await this.readStateFile(stateFile, "file", paths);
+        if (hit) return hit;
+        const err = new Error("数据文件读不出来或不是合法的 state：" + path.resolve(stateFile));
+        err.code = "BAD_STATE_FILE";
+        err.path = path.resolve(stateFile);
+        throw err;
+      } catch (err) {
+        // 设置里指定的文件坏了：记下来，继续往 Supabase 走（离线模式则直接回缓存）
+        this.lastError = err;
+        if (offline) return this.fromCache(err);
       }
     }
 
-    if (cfg.offline) {
+    if (offline) {
       return this.fromCache(new Error("离线模式（offline=true），只显示上一次读到的数据"));
     }
 
@@ -356,6 +380,16 @@ export class StudySource {
     throw err;
   }
 
+  /** 设置/数据变更后清掉内存缓存与客户端 session，让下一次 read 重新来（设置页保存会调） */
+  reset() {
+    this.cache = null;
+    this.session = null;
+    this.client = null;
+    this.clientKey = "";
+    this.lastError = null;
+    return true;
+  }
+
   status() {
     const paths = credentialPaths();
     return {
@@ -370,6 +404,7 @@ export class StudySource {
       fetchedAt: this.cache ? this.cache.fetchedAt : 0,
       home: paths.home,
       login: paths.login,
+      settings: paths.settings,
     };
   }
 }

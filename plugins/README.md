@@ -6,7 +6,7 @@
 
 | 目录 | 包名 | 形态 | 说明 |
 | --- | --- | --- | --- |
-| [study-widget](study-widget/) | `@local/dsh-study-widget` | host + web client + Electron 小窗 | 学习进度常驻桌面小窗 / DSH 侧栏面板 / `study_widget_progress` 工具 / `/study` 命令 |
+| [study-widget](study-widget/) | `@local/dsh-study-widget` | host + web client + Electron 小窗 | 学习进度常驻桌面小窗 / DSH 左栏主面板与设置页 / 侧栏面板 / `study_widget_progress` 工具 / `/study` 命令 |
 
 ## 2. 开发约定
 

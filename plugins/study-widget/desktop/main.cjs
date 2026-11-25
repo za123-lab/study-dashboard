@@ -2,10 +2,15 @@
  * Electron 端：一个无边框、置顶、透明的桌面小组件窗口。
  *
  * 由 lib/desktop.js 拉起，通过环境变量接收参数：
- *   DSH_STUDY_WIDGET_URL        要加载的页面（宿主 webServer 的 /dsh-study-widget/）
- *   DSH_STUDY_WIDGET_BOUNDS     JSON {x,y,width,height}，上次关窗时的位置
- *   DSH_STUDY_WIDGET_STATE_FILE 关窗时把位置写回这里
- *   DSH_STUDY_WIDGET_ICON       图标（可选）
+ *   DSH_STUDY_WIDGET_URL          要加载的页面（宿主 webServer 的 /dsh-study-widget/）
+ *   DSH_STUDY_WIDGET_SETTINGS_URL 设置页地址（可选）：带 --settings 启动时加载它
+ *   DSH_STUDY_WIDGET_BOUNDS       JSON {x,y,width,height}，上次关窗时的位置
+ *   DSH_STUDY_WIDGET_STATE_FILE   关窗/拖动时把位置写回这里
+ *   DSH_STUDY_WIDGET_ICON         图标（可选）
+ *   DSH_STUDY_WIDGET_PINNED       初始置顶态 "1"/"0"（可选，缺省 1；Host 用 settings.json 的 desktop.alwaysOnTop 传）
+ *
+ * 命令行：
+ *   --settings（或 --relaunch-settings）  同一个窗口改载设置页，不新开窗口
  *
  * 右键菜单 / 拖拽 / 置顶都在页面里通过 preload 暴露的 window.studyWidget 调用。
  */
@@ -14,11 +19,40 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const URL_TO_LOAD = process.env.DSH_STUDY_WIDGET_URL || "";
+const SETTINGS_URL = process.env.DSH_STUDY_WIDGET_SETTINGS_URL || "";
 const STATE_FILE = process.env.DSH_STUDY_WIDGET_STATE_FILE || "";
 const ICON = process.env.DSH_STUDY_WIDGET_ICON || "";
+const PINNED_ENV = process.env.DSH_STUDY_WIDGET_PINNED || "";
 
 const DEFAULT_SIZE = { width: 380, height: 640 };
+const TITLE = "学业工作台";
+const TITLE_SETTINGS = "学业工作台 · 设置";
+// 拖动/缩放会高频触发 move，合并成一次写盘；关闭窗口时先冲刷，位置不会丢
+const MOVE_SAVE_DELAY = 400;
+
 let win = null;
+
+function isSettingsFlag(arg) {
+  return arg === "--settings" || arg === "--relaunch-settings";
+}
+
+function hasSettingsFlag(argv) {
+  return Array.isArray(argv) && argv.slice(1).some(isSettingsFlag);
+}
+
+/** 初始置顶态：DSH_STUDY_WIDGET_PINNED 为 0/false/off 时关闭置顶；其它（含未传）保持原来的 true */
+function readInitialPinned() {
+  const raw = String(PINNED_ENV).trim().toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
+  if (raw && raw !== "1" && raw !== "true" && raw !== "on" && raw !== "yes") {
+    console.error("[study-widget] ignore bad DSH_STUDY_WIDGET_PINNED", JSON.stringify(PINNED_ENV));
+  }
+  return true;
+}
+
+// ready 之前就要决定加载哪个页面 / 初始置顶态
+let settingsMode = hasSettingsFlag(process.argv);
+let initialPinned = readInitialPinned();
 
 function readBounds() {
   const raw = process.env.DSH_STUDY_WIDGET_BOUNDS;
@@ -32,6 +66,42 @@ function readBounds() {
   return null;
 }
 
+/** 只认 http/https：javascript:、file:、ms-*: 之类一律拒绝 */
+function isSafeExternalUrl(url) {
+  if (typeof url !== "string") return false;
+  const text = url.trim();
+  if (!text || text.length > 4096) return false;
+  // 控制字符（含换行）可以拿来截断/伪装 URL，直接拒绝
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) < 0x20) return false;
+  }
+  try {
+    const parsed = new URL(text);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function openExternalSafe(url, tag) {
+  if (!isSafeExternalUrl(url)) {
+    console.error("[study-widget] reject external url", tag || "", JSON.stringify(String(url).slice(0, 200)));
+    return false;
+  }
+  try {
+    const pending = shell.openExternal(url.trim());
+    if (pending && typeof pending.catch === "function") {
+      pending.catch(function (err) {
+        console.error("[study-widget] openExternal failed", tag || "", err && err.message ? err.message : err);
+      });
+    }
+    return true;
+  } catch (err) {
+    console.error("[study-widget] openExternal threw", tag || "", err && err.message ? err.message : err);
+    return false;
+  }
+}
+
 function clampToDisplay(b) {
   const area = screen.getPrimaryDisplay().workArea;
   const width = Math.min(Math.max(280, b.width), Math.max(320, area.width));
@@ -43,20 +113,94 @@ function clampToDisplay(b) {
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 
+/** window.json 是唯一的位置真相：close / 拖动结束 / resize / hide / 退出前都走这里 */
 function saveBounds() {
-  if (!win || !STATE_FILE || win.isDestroyed()) return;
-  const b = win.getBounds();
+  if (!win || !STATE_FILE || win.isDestroyed()) return false;
+  let b = null;
+  try {
+    b = win.getBounds();
+  } catch (err) {
+    console.error("[study-widget] getBounds failed", err && err.message ? err.message : err);
+    return false;
+  }
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(b, null, 2), "utf8");
-  } catch {
-    /* 写不进去就算了，下次用默认位置 */
+    return true;
+  } catch (err) {
+    // 写不进去就算了，下次用默认位置；但要在 stderr 里留痕
+    console.error("[study-widget] saveBounds failed", err && err.message ? err.message : err);
+    return false;
   }
+}
+
+let moveSaveTimer = null;
+
+function scheduleSaveBounds() {
+  if (moveSaveTimer) return;
+  moveSaveTimer = setTimeout(function () {
+    moveSaveTimer = null;
+    saveBounds();
+  }, MOVE_SAVE_DELAY);
+  if (moveSaveTimer && typeof moveSaveTimer.unref === "function") moveSaveTimer.unref();
+}
+
+function flushPendingSave() {
+  if (!moveSaveTimer) return;
+  clearTimeout(moveSaveTimer);
+  moveSaveTimer = null;
+  saveBounds();
+}
+
+function alwaysOnTopLevel() {
+  return "floating";
+}
+
+/** 设置并回传真实状态；异常只写 stderr，不弹窗 */
+function applyAlwaysOnTop(on) {
+  if (!win || win.isDestroyed()) return false;
+  const value = !!on;
+  try {
+    win.setAlwaysOnTop(value, value ? alwaysOnTopLevel() : "normal");
+  } catch (err) {
+    console.error("[study-widget] setAlwaysOnTop failed", err && err.message ? err.message : err);
+  }
+  try {
+    return win.isAlwaysOnTop();
+  } catch (err) {
+    console.error("[study-widget] isAlwaysOnTop failed", err && err.message ? err.message : err);
+    return value;
+  }
+}
+
+/** 同一个窗口换页面：不新建窗口，避免第二份状态 */
+function loadTarget(target) {
+  if (!win || win.isDestroyed()) return false;
+  const url = isSafeExternalUrl(target) ? target : "";
+  try {
+    win.setTitle(url && url === SETTINGS_URL ? TITLE_SETTINGS : TITLE);
+  } catch {
+    /* 标题只是装饰 */
+  }
+  const pending = win.loadURL(url || "about:blank");
+  if (pending && typeof pending.catch === "function") {
+    pending.catch(function (err) {
+      console.error("[study-widget] loadURL failed", url, err && err.message ? err.message : err);
+    });
+  }
+  return true;
+}
+
+function currentTarget() {
+  if (settingsMode && SETTINGS_URL) return SETTINGS_URL;
+  return URL_TO_LOAD;
 }
 
 function createWindow() {
   const saved = readBounds();
   const bounds = clampToDisplay(saved || DEFAULT_SIZE);
+  settingsMode = hasSettingsFlag(process.argv);
+  initialPinned = readInitialPinned();
 
   win = new BrowserWindow({
     x: bounds.x,
@@ -69,13 +213,13 @@ function createWindow() {
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
-    alwaysOnTop: true,
+    alwaysOnTop: initialPinned,
     skipTaskbar: true,
     resizable: true,
     hasShadow: true,
     fullscreenable: false,
     maximizable: false,
-    title: "学业工作台",
+    title: settingsMode && SETTINGS_URL ? TITLE_SETTINGS : TITLE,
     ...(ICON && fs.existsSync(ICON) ? { icon: ICON } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -87,7 +231,7 @@ function createWindow() {
     },
   });
 
-  win.setAlwaysOnTop(true, "floating");
+  if (initialPinned) win.setAlwaysOnTop(true, alwaysOnTopLevel());
   try {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   } catch {
@@ -100,7 +244,8 @@ function createWindow() {
   }
 
   win.once("ready-to-show", function () {
-    console.log("[study-widget] ready-to-show bounds", JSON.stringify(win.getBounds()));
+    if (!win || win.isDestroyed()) return;
+    console.log("[study-widget] ready-to-show bounds", JSON.stringify(win.getBounds()), "target", settingsMode ? "settings" : "widget");
     win.showInactive();
   });
   win.webContents.on("render-process-gone", function (_e, d) {
@@ -108,21 +253,50 @@ function createWindow() {
   });
   win.webContents.setWindowOpenHandler(function (details) {
     // 课程链接用系统浏览器打开，别在小组件里跳走
-    if (/^https?:/i.test(details.url)) shell.openExternal(details.url);
+    openExternalSafe(details.url, "window-open");
     return { action: "deny" };
   });
-  win.on("close", saveBounds);
+  // 页面自身跳出宿主 origin（比如设置页里的外链）也交给系统浏览器
+  win.webContents.on("will-navigate", function (event, url) {
+    if (!isSafeExternalUrl(url)) return;
+    let sameOrigin = false;
+    try {
+      const base = currentTarget();
+      sameOrigin = !!base && new URL(url).origin === new URL(base).origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (sameOrigin) return;
+    event.preventDefault();
+    openExternalSafe(url, "will-navigate");
+  });
+  win.on("close", function () {
+    flushPendingSave();
+    saveBounds();
+  });
+  // 外部拖动（系统窗口管理器）也落盘，防止拖动后位置丢失
+  win.on("move", scheduleSaveBounds);
+  win.on("resized", scheduleSaveBounds);
   win.on("closed", function () {
+    flushPendingSave();
     win = null;
   });
   win.webContents.on("did-fail-load", function (_e, code, desc) {
     console.error("load failed", code, desc);
   });
-  win.loadURL(URL_TO_LOAD || "about:blank");
+  loadTarget(currentTarget());
 }
 
 ipcMain.handle("study-widget:minimize", function () {
   if (win && !win.isDestroyed()) win.hide();
+  return true;
+});
+
+ipcMain.handle("study-widget:hide", function () {
+  if (win && !win.isDestroyed()) {
+    flushPendingSave();
+    win.hide();
+  }
   return true;
 });
 
@@ -133,9 +307,11 @@ ipcMain.handle("study-widget:close", function () {
 
 ipcMain.handle("study-widget:toggle-pin", function () {
   if (!win || win.isDestroyed()) return false;
-  const next = !win.isAlwaysOnTop();
-  win.setAlwaysOnTop(next, next ? "floating" : "normal");
-  return next;
+  return applyAlwaysOnTop(!win.isAlwaysOnTop());
+});
+
+ipcMain.handle("study-widget:set-always-on-top", function (_e, on) {
+  return applyAlwaysOnTop(!!on);
 });
 
 ipcMain.handle("study-widget:is-pinned", function () {
@@ -146,7 +322,14 @@ let dragging = null;
 
 ipcMain.handle("study-widget:move-state", function (_e, active) {
   if (!win || win.isDestroyed()) return false;
-  dragging = active ? { x: win.getBounds().x, y: win.getBounds().y } : null;
+  if (active) {
+    const b = win.getBounds();
+    dragging = { x: b.x, y: b.y };
+  } else {
+    dragging = null;
+    // 拖完立刻落盘一次，别等节流定时器
+    saveBounds();
+  }
   return !!dragging;
 });
 
@@ -154,7 +337,12 @@ ipcMain.handle("study-widget:move-by", function (_e, dx, dy) {
   if (!win || win.isDestroyed() || !dragging) return false;
   const nx = Math.round(dragging.x + (Number(dx) || 0));
   const ny = Math.round(dragging.y + (Number(dy) || 0));
-  win.setPosition(nx, ny, false);
+  try {
+    win.setPosition(nx, ny, false);
+  } catch (err) {
+    console.error("[study-widget] setPosition failed", err && err.message ? err.message : err);
+    return false;
+  }
   return true;
 });
 
@@ -174,8 +362,12 @@ ipcMain.handle("study-widget:resize", function (_e, w, h) {
 });
 
 ipcMain.handle("study-widget:open-external", function (_e, url) {
-  if (typeof url === "string" && /^https?:/i.test(url)) shell.openExternal(url);
+  openExternalSafe(url, "open-external");
   return true;
+});
+
+ipcMain.handle("study-widget:shell-open", function (_e, url) {
+  return openExternalSafe(url, "shell-open");
 });
 
 ipcMain.handle("study-widget:context-menu", function (event) {
@@ -187,13 +379,16 @@ ipcMain.handle("study-widget:context-menu", function (event) {
       type: "checkbox",
       checked: pinned,
       click: function () {
-        win.setAlwaysOnTop(!win.isAlwaysOnTop(), "floating");
-        win.webContents.send("study-widget:pinned-changed", win.isAlwaysOnTop());
+        const next = applyAlwaysOnTop(!win.isAlwaysOnTop());
+        win.webContents.send("study-widget:pinned-changed", next);
       },
     },
     {
       label: "刷新数据",
+      // 设置页没有 onRefresh 监听，设置模式下干脆不显示这一项
+      visible: !settingsMode,
       click: function () {
+        if (!win || win.isDestroyed() || settingsMode) return;
         win.webContents.send("study-widget:refresh");
       },
     },
@@ -201,12 +396,13 @@ ipcMain.handle("study-widget:context-menu", function (event) {
     {
       label: "打开网页版工作台",
       click: function () {
-        shell.openExternal("https://glebah23.github.io/study-dashboard/");
+        openExternalSafe("https://glebah23.github.io/study-dashboard/", "menu");
       },
     },
     {
       label: "隐藏窗口",
       click: function () {
+        flushPendingSave();
         win.hide();
       },
     },
@@ -222,14 +418,19 @@ ipcMain.handle("study-widget:context-menu", function (event) {
 });
 
 if (!app.requestSingleInstanceLock()) {
-  // 第二次启动：把已有窗口唤到前面（最小化的也显示出来）
+  // 第二次启动：把已有窗口唤到前面（最小化的也显示出来），然后退出
   app.quit();
 } else {
-  app.on("second-instance", function () {
-    if (win && !win.isDestroyed()) {
+  app.on("second-instance", function (_event, argv) {
+    if (!win || win.isDestroyed()) return;
+    // 第二次启动带 --settings：同一个窗口换成设置页，不新开窗口
+    if (hasSettingsFlag(argv)) {
       if (!win.isVisible()) win.showInactive();
-      win.setAlwaysOnTop(true, "floating");
+      if (SETTINGS_URL) loadTarget(SETTINGS_URL);
+      return;
     }
+    if (!win.isVisible()) win.showInactive();
+    win.setAlwaysOnTop(true, alwaysOnTopLevel());
   });
   process.on("uncaughtException", function (err) {
     console.error("[study-widget] uncaught", err && err.stack ? err.stack : err);
@@ -245,6 +446,11 @@ if (!app.requestSingleInstanceLock()) {
       }
     }
     createWindow();
+  });
+  app.on("before-quit", function () {
+    // 退出前把没落盘的拖动位置补上
+    flushPendingSave();
+    saveBounds();
   });
   app.on("window-all-closed", function () {
     app.quit();

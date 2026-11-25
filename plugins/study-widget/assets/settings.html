@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>学业工作台 · 设置</title>
+    <link rel="stylesheet" href="./settings.css" />
+  </head>
+  <body data-embed="standalone">
+    <!--
+      学业工作台设置页（自包含，无框架、无构建）
+
+      打开方式：DSH 路由 /dsh-study-widget/settings（lead 在 index.js 里加路由），
+      也可能被 DSH 用 iframe 嵌入，所以：
+        - 不假设存在 window.studyWidget（那是 Electron preload 才会注入的）；
+        - 所有请求走同源 /dsh-study-widget/api/...；
+        - 静态资源用相对路径 ./settings.css、./settings.js。
+      页面结构由 settings.js 动态生成，这里只保留语义骨架与跳过链接。
+    -->
+    <a class="skip-link" href="#content">跳到设置内容</a>
+
+    <div class="shell" id="shell" data-state="loading">
+      <!-- 顶栏：标题 + 状态条 + 刷新 -->
+      <header class="topbar" id="topbar">
+        <div class="topbar-main">
+          <div class="title-row">
+            <span class="brand-dot" id="brandDot" data-kind="loading" aria-hidden="true"></span>
+            <h1 class="title">学业工作台设置</h1>
+            <span class="subtitle" id="pageHint">正在读取设置…</span>
+          </div>
+          <!-- 四个状态格由 settings.js 填充：数据源 / 同步 / 桌面窗口 / 插件 -->
+          <div class="status-strip" id="statusStrip" role="status" aria-live="polite"></div>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-ghost" id="btnReload" title="重新读取服务端设置（丢弃未保存修改）">重新读取</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <!-- 分区导航：窄屏变成横向分区条 -->
+        <nav class="sections" id="sections" aria-label="设置分区"></nav>
+
+        <!-- 表单区：每个分区一张卡片，由 settings.js 生成 -->
+        <main class="content" id="content">
+          <div class="booting" id="booting">正在读取设置…</div>
+        </main>
+      </div>
+    </div>
+
+    <!-- toast 容器（保存成功 / 需要重启提示 / 错误） -->
+    <div class="toast-stack" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+    <script src="./settings.js"></script>
+  </body>
+</html>

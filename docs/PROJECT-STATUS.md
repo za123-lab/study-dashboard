@@ -111,9 +111,12 @@ study-dashboard/
 │   ├── PROJECT-STATUS.md               本文档
 │   └── wiki/                           代码级文档（架构、数据、UI、云同步、部署、插件）
 ├── plugins/                            DSH 插件（每个子目录一个 @local/* 包）
-│   └── study-widget/                   学业工作台桌面小组件：桌面小窗 / 侧栏面板 / 助手工具
+│   └── study-widget/                   学业工作台：左栏主面板 + 设置页 / 桌面小窗 / 侧栏面板 / 助手工具
+│       ├── lib/settings.js             设置持久化（settings.json、原子写、密码只进不出）
+│       ├── assets/settings.*           设置页（连接 / 窗口 / 数据与刷新 / 插件 / 高级 / 关于）
 │       ├── scripts/smoke.mjs           15 项冒烟自测，零依赖、不启动 DSH
-│       └── docs/shots/                 交付用界面截图
+│       ├── scripts/smoke-settings.mjs  设置端点冒烟自测
+│       └── docs/                       截图（shots/）与端到端验收清单（ACCEPTANCE.md）
 ├── supabase/
 │   ├── schema.sql                      主表 + RLS + Realtime
 │   └── history.sql                     历史归档表 + 触发器
@@ -130,9 +133,21 @@ study-dashboard/
 
 ## 7. 近期已完成
 
+- **面板内「设置」入口（本轮补完）**：`client.js` 的 `makePanel` 增加 `view` 状态（`data` / `settings`），
+  顶栏改为「进度 | 设置」等宽分段控件（`role=tablist`，`aria-selected` 同步），点「设置」在**同一 iframe** 内把 `?mode=panel`
+  换成 `settings?v=`，不新开窗口、不丢面板状态；设置视图下标题变「设置」、「桌面小窗」按钮隐藏、「刷新」保留。
+  顶栏图标同时从 emoji（📌）换成内联 SVG（`ICON_PIN` / `ICON_REFRESH` / `ICON_GEAR` / `ICON_CHART`，全部 `stroke="currentColor"`），
+  深浅色与主题 token 一致。此前设置页虽然路由就绪（`/dsh-study-widget/settings` 200），但面板顶栏没有任何入口能进去。
+- **学业工作台做进 DSH 左栏（本轮）**：左侧栏新增「学业工作台」一级入口（`sidebar.panellist` + 主区 `main` 整页），
+  面板内自带设置页，把 Supabase 连接（URL / anon key / 邮箱 / 密码，含「测试连接」）、窗口开关与置顶/尺寸、
+  刷新间隔与离线、数据源导入导出、插件启用/禁用/重载、Electron 路径全部收进 DSH ——
+  **不再需要手改 `~/.dsh/study-widget/login.json`**（该文件保留为命令行/无 UI 时的备用方式）。
+  设置存 `~/.dsh/study-widget/settings.json`（原子写），保存即生效、不重启插件；密码只进不出，接口只返回 `hasPassword`；
+  插件开关委托宿主 `pluginManager`，插件自身不碰 profile 的 patch。原有右侧栏标签与桌面小窗保留，三处共享同一份数据。
+  详见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md)，验收步骤见 [插件验收清单](../plugins/study-widget/docs/ACCEPTANCE.md)。
 - **桌面小组件插件（本机已安装）**：`plugins/study-widget/` 把学习进度做成 DSH 里的常驻桌面小窗（Electron 无边框、置顶、记住位置），
   同时提供右侧栏面板、`study_widget_progress` 助手工具与 `/study` 命令；统计口径与网页版逐项对齐，断网回落本地快照。
-  详见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md)。当前显示的是演示数据，填好 `~/.dsh/study-widget/login.json` 后切到真实账号。
+  详见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md)。当前显示的是演示数据，在左栏设置页填好真实凭据后切到真实账号。
 - **1.1.8（已上传，开发版）**：Apple 液态玻璃界面与自定义胶囊底栏、弹层打开隐藏底栏、弹窗退场/操作反馈/页面切换显影动画、弹窗加透、打卡当天可累加按天去重、导航栏标题兜底、日历红框标记待办与打卡。详见 [09 小程序界面与交互开发规范](wiki/09-miniprogram-ui-standards.md) 的踩坑日志。
 - **1.1.7（已上传）**：学习页热力图与日历页月历用红框标记待办 / 完成 / 打卡。
 - **示例数据功能下线**：填入 / 清除示例入口及相关函数已删除，遗留字段读入时自动剔除；两端文档已同步更正。
