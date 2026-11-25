@@ -7,19 +7,53 @@
  *   3. 提供「打开/关闭桌面小窗」能力（Electron 无边框置顶窗口）
  *   4. /study 斜杠命令与 agent tool，让 DSH 里的助手也能直接报进度
  */
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { StudySource } from "./lib/source.js";
+import { StudySource, widgetHome } from "./lib/source.js";
 import { buildSummary } from "./lib/summary.js";
 import { createDesktopLauncher } from "./lib/desktop.js";
 import { createSettingsRoutes } from "./lib/settings-routes.js";
+import { createMutator } from "./lib/mutate.js";
 import { SettingsStore } from "./lib/settings.js";
 
 export const name = "study-widget";
 
+/** 本文件所在目录；日志回退路径也用它，必须在 writePluginLog 之前定义 */
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 同步写一行日志。为什么不用 logger：宿主 logger 在很多部署里不落盘，
+ * 插件 apply 抛错时 loader 只把它标成 absent，界面上完全没痕迹——排查时等于瞎。
+ * 同步写保证崩溃/退出前已经刷到磁盘。
+ *
+ * 目标顺序：
+ *   1. ~/.dsh/study-widget/plugin.log（正式位置）
+ *   2. <repo>/.tmp-probe/plugin.log（工作区内回退；沙盒/权限不让写上面时仍能取证）
+ */
+export function writePluginLog(line) {
+  const text = "[" + new Date().toISOString() + "] " + line + "\n";
+  const targets = [];
+  try {
+    targets.push(path.join(widgetHome(), "plugin.log"));
+  } catch {
+    /* widgetHome 极端情况下会抛，忽略 */
+  }
+  targets.push(path.join(HERE, "..", "..", ".tmp-probe", "plugin.log"));
+  for (const file of targets) {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, text, "utf8");
+      return file;
+    } catch {
+      /* 换下一个目标 */
+    }
+  }
+  return "";
+}
+
 const ROUTE = "/dsh-study-widget";
 const SUMMARY_TTL_MS = 30 * 1000;
 
@@ -33,19 +67,40 @@ const MIME = {
 };
 
 export function apply(ctx, config) {
+  // 进入 apply 先落一行：能区分「loader 根本没调用 apply」（这行都没有）
+  // 和「apply 内部抛错」（有这行、没有后续 ready 行）。
+  writePluginLog("apply enter; node=" + process.version + " electron=" + (process.versions.electron || "-"));
+  try {
+    return applyInner(ctx, config);
+  } catch (err) {
+    const detail = err && err.stack ? err.stack : String((err && err.message) || err);
+    writePluginLog("apply FAILED: " + detail);
+    throw err;
+  }
+}
+
+function applyInner(ctx, config) {
   const cfg = config || {};
-  const logger = ctx.logger ? ctx.logger("study-widget") : console;
+  const logger = (ctx && ctx.logger) ? ctx.logger("study-widget") : console;
   const assetsDir = path.resolve(HERE, cfg.assetsDir || "assets");
   const source = new StudySource();
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   const cache = { summary: null, at: 0 };
   const waiters = new Map();
   const settingsStore = new SettingsStore();
+  /** 写入器：待办勾选 / 打卡。只在数据源是 supabase 时放行，见 lib/mutate.js */
+  const mutator = createMutator(source);
 
   const webServer = ctx.get("webServer");
+  writePluginLog("webServer=" + (webServer ? (typeof webServer) : "undefined"));
+  /**
+   * 每次调用都重新取一次服务：apply 时拿到的快照可能是 undefined，
+   * 而桌面小窗真正开窗时服务早已就绪。返回空串表示此刻还不可用。
+   */
   const originProvider = function () {
     try {
-      return webServer && webServer.getOrigin ? webServer.getOrigin() : "";
+      const server = ctx.get("webServer");
+      return server && server.getOrigin ? server.getOrigin() : "";
     } catch {
       return "";
     }
@@ -161,6 +216,64 @@ export function apply(ctx, config) {
     res.end(text);
   }
 
+  /**
+   * 读一个 JSON 请求体。
+   * 上限 64KB：这里的接口只收 { id, checked, min } 这种小对象，
+   * 给大一点是给未来的批量操作留余量，同时仍然挡住被当成上传通道。
+   */
+  function readJsonBody(req, limit) {
+    const cap = limit || 64 * 1024;
+    return new Promise(function (resolve, reject) {
+      let body = "";
+      let aborted = false;
+      req.on("data", function (chunk) {
+        if (aborted) return;
+        body += chunk;
+        if (body.length > cap) {
+          aborted = true;
+          const err = new Error("请求体太大");
+          err.code = "BODY_TOO_LARGE";
+          reject(err);
+          req.destroy();
+        }
+      });
+      req.on("end", function () {
+        if (aborted) return;
+        if (!body.trim()) {
+          resolve({});
+          return;
+        }
+        try {
+          const parsed = JSON.parse(body);
+          resolve(parsed && typeof parsed === "object" ? parsed : {});
+        } catch {
+          const err = new Error("请求体不是合法 JSON");
+          err.code = "BAD_JSON";
+          reject(err);
+        }
+      });
+      req.on("error", reject);
+    });
+  }
+
+  /** 把 mutate 抛出的业务错误翻成 HTTP 状态 + 结构化 payload */
+  function sendWriteError(res, err) {
+    const code = (err && err.code) || "WRITE_FAILED";
+    const message = String((err && err.message) || err);
+    const status =
+      code === "TODO_NOT_FOUND" || code === "CHECKIN_NOT_FOUND"
+        ? 404
+        : code === "READ_ONLY_SOURCE"
+          ? 409
+          : code === "MIN_REQUIRED" || code === "BAD_ID" || code === "BAD_DATA"
+            ? 400
+            : code === "CONFLICT"
+              ? 409
+              : 502;
+    writePluginLog("write failed: " + code + " " + message);
+    sendJson(res, status, { ok: false, error: { code: code, message: message } });
+  }
+
   function authorized(req, url) {
     if (cfg.requireToken === false) return true;
     const given = url.searchParams.get("token") || "";
@@ -194,8 +307,23 @@ export function apply(ctx, config) {
       return;
     }
     try {
-      const body = await fsPromises.readFile(abs);
-      const type = MIME[path.extname(abs).toLowerCase()] || "application/octet-stream";
+      let body = await fsPromises.readFile(abs);
+      let type = MIME[path.extname(abs).toLowerCase()] || "application/octet-stream";
+      // widget.css / settings.css 都是「共用材质 + 布局 + 组件玻璃覆盖」的拼装产物：
+      // 材质那份（liquid-glass.css）三端共用，避免小窗/设置页/面板各写一套配方漂移。
+      // 注意：开发期磁盘上的 widget.css / settings.css 已经是拼好的正式版（scripts/build-css.py --write），
+      // 这里再拼一次会重复，所以用「文件头是否已含材质变量」判断，只在还是纯布局稿时才拼。
+      if (rel === "widget.css" || rel === "settings.css") {
+        const text = body.toString("utf8");
+        if (text.indexOf("--lg-fill:") === -1) {
+          const files = ["liquid-glass.css", rel];
+          if (rel === "settings.css") files.push("liquid-glass-settings.css");
+          const parts = [];
+          for (const f of files) parts.push(await fsPromises.readFile(path.join(assetsDir, f), "utf8"));
+          body = Buffer.from(parts.join("\n"), "utf8");
+          type = "text/css; charset=utf-8";
+        }
+      }
       res.writeHead(200, {
         "Content-Type": type,
         "Cache-Control": "no-cache",
@@ -247,6 +375,76 @@ export function apply(ctx, config) {
 
     if (rel === "/api/status") {
       sendJson(res, 200, { ok: true, status: source.status(), desktop: desktop.status() });
+      return;
+    }
+
+    /*
+     * 写入接口（面板 / 小窗点勾选与打卡时调用）。
+     *
+     *   POST /api/todo/toggle     { id, checked? }        checked 省略 = 翻转
+     *   POST /api/checkin/toggle  { id, min?, note? }     视频打卡必须带 min
+     *
+     * 写成功后清掉快照缓存并回传最新 summary，界面可以直接拿它重绘，
+     * 不必再等下一次轮询。
+     */
+    if (
+      rel === "/api/todo/toggle" ||
+      rel === "/api/checkin/toggle" ||
+      rel === "/api/checkin/log" ||
+      rel === "/api/checkin/unlog"
+    ) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { ok: false, error: { code: "METHOD_NOT_ALLOWED", message: "只接受 POST" } });
+        return;
+      }
+      let payload;
+      try {
+        payload = await readJsonBody(req);
+      } catch (err) {
+        sendWriteError(res, err);
+        return;
+      }
+      try {
+        let result;
+        if (rel === "/api/todo/toggle") {
+          result = await mutator.toggleTodo(payload.id, typeof payload.checked === "boolean" ? payload.checked : undefined);
+        } else if (rel === "/api/checkin/log") {
+          result = await mutator.logCheckin(payload.id, {
+            min: payload.min,
+            cid: payload.cid,
+            lid: payload.lid,
+            note: payload.note,
+          });
+        } else if (rel === "/api/checkin/unlog") {
+          result = await mutator.removeCheckinLog(payload.id, payload.at);
+        } else {
+          result = await mutator.toggleCheckin(payload.id, { min: payload.min, note: payload.note });
+        }
+        /*
+         * 用刚写回的数据重建快照，不再额外拉一次云端：
+         * mutator 已经把写成功后的 { data, rev } 放进了 source.cache，
+         * 直接基于它算 summary，省一次往返，也避免"刚写完又读到旧值"的窗口。
+         */
+        let summary = null;
+        try {
+          const row = source.cache;
+          if (row && row.data) {
+            summary = buildSummary(row.data, {
+              source: row.source,
+              rev: row.rev,
+              email: row.email,
+              syncedAt: row.fetchedAt || Date.now(),
+            });
+            cache.summary = summary;
+            cache.at = Date.now();
+          }
+        } catch (err) {
+          logger.warn && logger.warn("写入后重建快照失败：" + ((err && err.message) || err));
+        }
+        sendJson(res, 200, Object.assign({ ok: true }, result, { summary: summary }));
+      } catch (err) {
+        sendWriteError(res, err);
+      }
       return;
     }
 
@@ -304,29 +502,46 @@ export function apply(ctx, config) {
       await serveAsset(res, "settings.html");
       return;
     }
+    // 设置页样式同样拼上共用材质
+    if (rel === "/settings.css") {
+      await serveAsset(res, "settings.css");
+      return;
+    }
+    if (rel === "/liquid-glass.css") {
+      await serveAsset(res, "liquid-glass.css");
+      return;
+    }
     await serveAsset(res, rel.replace(/^\/+/, ""));
   }
 
-  ctx.effect(function () {
-    if (!webServer) {
-      logger.warn("webServer 不可用：桌面小组件页面无法提供，只保留命令与工具");
-      return function () {};
+  // 路由注册必须等 webServer 服务就绪。
+  // Cordis 的 ctx.get() 是同步取值：apply 执行时 webServer 可能还没挂载（Desktop 实测为
+  // undefined），早先的写法会在这里判定「不可用」并永久跳过注册——面板 iframe 于是拿到 404
+  // 空白页，桌面小窗也加载不到页面。用 ctx.inject 声明依赖，服务出现后回调才会执行。
+  ctx.inject(["webServer"], function (sctx) {
+    const server = sctx.webServer;
+    if (!server || typeof server.register !== "function") {
+      logger.warn("webServer 服务不完整：没有 register()，路由无法注册");
+      return;
     }
-    return webServer.register({
-      kind: "prefix",
-      path: ROUTE,
-      handler: function (req, res) {
-        handle(req, res).catch(function (err) {
-          logger.warn("route error: " + ((err && err.stack) || err));
-          try {
-            sendJson(res, 500, { ok: false, error: { message: String((err && err.message) || err) } });
-          } catch {
-            /* 响应可能已经结束 */
-          }
-        });
-      },
-    });
-  }, "study-widget: web routes");
+    writePluginLog("webServer ready -> registering " + ROUTE);
+    sctx.effect(function () {
+      return server.register({
+        kind: "prefix",
+        path: ROUTE,
+        handler: function (req, res) {
+          handle(req, res).catch(function (err) {
+            logger.warn("route error: " + ((err && err.stack) || err));
+            try {
+              sendJson(res, 500, { ok: false, error: { message: String((err && err.message) || err) } });
+            } catch {
+              /* 响应可能已经结束 */
+            }
+          });
+        },
+      });
+    }, "study-widget: web routes");
+  });
 
   // ---------- 命令 & 工具 ----------
 
@@ -424,22 +639,60 @@ export function apply(ctx, config) {
   }
 
   logger.info && logger.info("ready: " + ROUTE + "/ (desktop window " + (desktop.alive() ? "running" : "idle") + ")");
+  writePluginLog("ready: " + ROUTE + "/ route registered; assetsDir=" + assetsDir);
 
-  // autoOpen：等 webServer 就绪（originProvider 拿得到地址）再开窗，失败只记日志不炸插件
-  if (cfg.autoOpen) {
-    const timer = setTimeout(function () {
-      desktop.open({}).catch(function (err) {
-        logger.warn && logger.warn("autoOpen failed: " + String((err && err.message) || err));
+  // autoOpen：桌面设置页的「随 DSH 启动自动打开小窗」（settings.json 的 desktop.autoOpen），
+  // 插件配置 cfg.autoOpen 仅在设置项没有明确写布尔值时兜底。
+  // 早先只看 cfg.autoOpen，而 profile 的 insert 行从不给 config，开关写了也不生效。
+  // 开窗还必须等 webServer 就绪（originProvider 拿得到地址），所以用 inject 而不是 setTimeout 干等；
+  // 失败只记日志，不炸插件。
+  autoOpenIfEnabled();
+
+  async function autoOpenIfEnabled() {
+    let wanted = null;
+    let from = "settings.json";
+    // 开关读不出来（文件坏了）就按关处理：设置问题不该在启动时反复弹失败
+    const saved = await Promise.resolve()
+      .then(function () {
+        return settingsStore.load();
+      })
+      .catch(function (err) {
+        writePluginLog("autoOpen: 读设置失败，本次不自动开窗：" + String((err && err.message) || err));
+        return null;
       });
-    }, 1500);
-    ctx.effect(
-      function () {
-        return function () {
-          clearTimeout(timer);
-        };
-      },
-      "study-widget: autoOpen timer"
-    );
+    const value = saved && saved.desktop ? saved.desktop.autoOpen : undefined;
+    if (typeof value === "boolean") wanted = value;
+    if (wanted === null) {
+      wanted = !!cfg.autoOpen;
+      from = "插件配置";
+    }
+    writePluginLog("autoOpen=" + wanted + "（来源：" + from + "）");
+    if (!wanted) return;
+
+    ctx.inject(["webServer"], function (sctx) {
+      const server = sctx.webServer;
+      if (!server || typeof server.getOrigin !== "function") return;
+      const timer = setTimeout(function () {
+        desktop.open({}).then(
+          function (result) {
+            writePluginLog("autoOpen -> " + (result && result.ok ? "opened " + (result.reused ? "(reused)" : "") : "failed: " + (result && result.error)));
+          },
+          function (err) {
+            const detail = String((err && err.message) || err);
+            writePluginLog("autoOpen failed: " + detail);
+            logger.warn && logger.warn("autoOpen failed: " + detail);
+          }
+        );
+      }, 800);
+      sctx.effect(
+        function () {
+          return function () {
+            clearTimeout(timer);
+          };
+        },
+        "study-widget: autoOpen timer"
+      );
+    });
   }
 
   return function () {

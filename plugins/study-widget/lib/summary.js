@@ -12,6 +12,8 @@ import {
   checkinCadenceText,
   checkinCycle,
   courseStats,
+  currentLesson,
+  lessonOptions,
   dateKey,
   dayStats,
   fmtDur,
@@ -264,6 +266,27 @@ export function buildSummary(raw, opts) {
         return a + (l.min || 0);
       }, 0),
       totalLogs: c.logs.length,
+      // 今天的每次打卡明细（一天可多次）：时间、分钟、节次，给弹窗「已记录」列表用
+      todayLogs: todayLogs.map(function (l) {
+        return { at: l.at || 0, min: l.min || 0, idx: l.idx || 0, lid: l.lid || "", cid: l.cid || "", note: l.note || "" };
+      }),
+      // 视频打卡的「当前节次」：第一个没看完的课时，全部看完为 null
+      current: (function () {
+        if (c.kind !== "video" || !course) return null;
+        const cur = currentLesson(course);
+        if (!cur) return null;
+        return {
+          id: cur.lesson.id,
+          idx: cur.index,
+          title: cur.lesson.title,
+          before: cur.before,
+          total: cur.total,
+          beforeText: fmtDur(cur.before),
+          totalText: cur.total ? fmtDur(cur.total) : "—",
+        };
+      })(),
+      // 节次列表：允许手动切到别的节次
+      lessonOptions: c.kind === "video" && course ? lessonOptions(course).map(function (o) { return Object.assign({}, o, { courseId: course.id }); }) : [],
     };
   });
   const checkinToday = state.checkins.reduce(function (a, c) {

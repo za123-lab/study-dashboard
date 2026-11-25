@@ -92,15 +92,41 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--dsw-alias-bg-layer-1, transparent);
+  position: relative;
   color: var(--dsw-alias-label-primary, inherit);
+  /* 面板外壳也是一块玻璃：铺低饱和环境光，让里面的 iframe 玻璃有东西可透 */
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 34%, transparent 58%),
+    var(--dsw-alias-bg-layer-1, transparent);
+}
+.sw-panel-host::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  background:
+    radial-gradient(42% 38% at 88% 4%, rgba(196, 90, 78, 0.14), transparent 72%),
+    radial-gradient(46% 40% at 4% 68%, rgba(88, 128, 174, 0.14), transparent 74%),
+    radial-gradient(38% 34% at 62% 100%, rgba(210, 168, 96, 0.14), transparent 72%);
+}
+.sw-panel-host > * {
+  position: relative;
+  z-index: 1;
 }
 .sw-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.25));
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25));
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent 78%),
+    var(--dsw-alias-bg-layer-2, transparent);
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
   flex: 0 0 auto;
 }
 .sw-bar-title {
@@ -116,16 +142,24 @@
 .sw-btn {
   appearance: none;
   border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.3));
-  background: var(--dsw-alias-bg-layer-2, transparent);
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.10), transparent 62%),
+    var(--dsw-alias-bg-layer-2, transparent);
   color: var(--dsw-alias-label-secondary, inherit);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 11px;
   line-height: 1.6;
-  padding: 2px 8px;
+  padding: 3px 9px;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
-.sw-btn:hover { color: var(--dsw-alias-label-primary, inherit); }
+.sw-btn:hover {
+  color: var(--dsw-alias-label-primary, inherit);
+  border-color: var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.45));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 6px -3px rgba(0, 0, 0, 0.3);
+}
+.sw-btn:active { transform: scale(0.96); }
 .sw-frame {
   flex: 1 1 auto;
   width: 100%;
@@ -143,8 +177,12 @@
 .sw-seg {
   display: inline-flex;
   align-items: center;
+  padding: 2px;
+  gap: 2px;
   border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.3));
-  border-radius: 7px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.08));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   flex: 0 0 auto;
 }
@@ -157,22 +195,28 @@
   font-size: 11px;
   line-height: 1.6;
   padding: 2px 10px;
+  border-radius: 999px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
 .sw-seg > button + button {
-  border-left: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.3));
+  border-left: 0;
 }
 .sw-seg > button:hover {
   color: var(--dsw-alias-label-primary, inherit);
 }
 .sw-seg > button[aria-selected="true"] {
-  background: var(--dsw-alias-bg-layer-3, rgba(128,128,128,0.16));
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.18), transparent 62%),
+    var(--dsw-alias-bg-layer-1, rgba(128, 128, 128, 0.16));
   color: var(--dsw-alias-label-primary, inherit);
   font-weight: 600;
+  box-shadow:
+    0 1px 4px -2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .sw-btn .sw-ic,
 .sw-seg .sw-ic {

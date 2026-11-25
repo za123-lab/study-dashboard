@@ -19,6 +19,8 @@ import { credentialPaths, readJson, writeJson } from "./source.js";
 export const DEFAULTS = {
   supabase: { url: "", anonKey: "", email: "" },
   desktop: { autoOpen: false, alwaysOnTop: true, width: 380, height: 640 },
+  // 外观：system 跟随系统 / dark / light。小窗的壳（原生材质）与页面玻璃都读这一个值
+  appearance: { theme: "system" },
   refresh: { summaryTtlSeconds: 30, pageSeconds: 300, autoRefresh: true },
   data: { offline: false, stateFile: "" },
   advanced: { electronPath: "" },
@@ -39,10 +41,15 @@ const BOOLEAN_PATHS = [
   "data.offline",
 ];
 
+/** 外观：三选一，不是布尔也不是数值，单独校验 */
+const ENUM_PATHS = { "appearance.theme": ["system", "dark", "light"] };
+
 const TEXT_PATHS = ["supabase.url", "supabase.anonKey", "supabase.email", "data.stateFile", "advanced.electronPath"];
 
 /** 认的输入路径（防止前端把 SettingsView 里多给的字段原样回写） */
-const INPUT_PATHS = TEXT_PATHS.concat(BOOLEAN_PATHS, Object.keys(RANGES), ["supabase.password"]);
+const INPUT_PATHS = TEXT_PATHS.concat(BOOLEAN_PATHS, Object.keys(RANGES), Object.keys(ENUM_PATHS), [
+  "supabase.password",
+]);
 
 function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -109,6 +116,7 @@ export class SettingsStore {
     pick(merged, source, "refresh", Object.keys(DEFAULTS.refresh));
     pick(merged, source, "data", Object.keys(DEFAULTS.data));
     pick(merged, source, "advanced", ["electronPath"]);
+    pick(merged, source, "appearance", ["theme"]);
 
     // 记下迁移前的状态：来源是磁盘上的设置还是 login.json（source.js 据此决定 source 标什么）
     const onDisk = merged.supabase;
@@ -159,6 +167,8 @@ export class SettingsStore {
       desktop: Object.assign({}, DEFAULTS.desktop, v.desktop),
       refresh: Object.assign({}, DEFAULTS.refresh, v.refresh),
       data: Object.assign({}, DEFAULTS.data, v.data),
+      // 外观：小窗外壳（原生材质）与页面玻璃共用一个开关
+      appearance: Object.assign({}, DEFAULTS.appearance, v.appearance),
       advanced: Object.assign({}, DEFAULTS.advanced, v.advanced, {
         homeDir: this.home,
         // 只读路径：前端不用自己拼分隔符（Windows 上是反斜杠）
@@ -175,7 +185,7 @@ export class SettingsStore {
    */
   sanitize(partial) {
     if (!isObject(partial)) throw badField("settings", "INVALID_SETTINGS", "settings 必须是一个对象");
-    const out = { supabase: {}, desktop: {}, refresh: {}, data: {}, advanced: {} };
+    const out = { supabase: {}, desktop: {}, refresh: {}, data: {}, advanced: {}, appearance: {} };
     const secret = {};
 
     if (Object.prototype.hasOwnProperty.call(partial, "supabase")) {
@@ -223,13 +233,21 @@ export class SettingsStore {
       }
     }
 
-    for (const section of ["desktop", "refresh", "data", "advanced"]) {
+    for (const section of ["desktop", "refresh", "data", "advanced", "appearance"]) {
       if (!Object.prototype.hasOwnProperty.call(partial, section)) continue;
       const given = partial[section];
       if (!isObject(given)) throw badField(section, "INVALID_FIELD", section + " 必须是对象");
       for (const key of Object.keys(given)) {
         const field = section + "." + key;
         if (INPUT_PATHS.indexOf(field) === -1) continue;
+        if (ENUM_PATHS[field]) {
+          const v = String(given[key] == null ? "" : given[key]).trim();
+          if (ENUM_PATHS[field].indexOf(v) === -1) {
+            throw badField(field, "INVALID_FIELD", field + " 只能是 " + ENUM_PATHS[field].join(" / "));
+          }
+          out[section][key] = v;
+          continue;
+        }
         if (BOOLEAN_PATHS.indexOf(field) > -1) {
           if (typeof given[key] !== "boolean") {
             throw badField(field, "INVALID_FIELD", field + " 必须是布尔值");

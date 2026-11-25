@@ -84,9 +84,15 @@ const fakeCtx = {
         if (i > -1) routes.splice(i, 1);
       };
     },
+    getOrigin() {
+      // autoOpen 要等「拿得到地址」才开窗；这里给个假 origin 让自动开窗流程也能跑通
+      return `http://127.0.0.1:${PORT}`;
+    },
   },
   inject(services, cb) {
     if (services.includes("tools")) cb({ effect: track, tools: { register: (tool) => tool } });
+    // 与真实宿主一致：webServer 已在 get() 里可见，依赖满足立即回调
+    if (services.includes("webServer")) cb({ effect: track, webServer: fakeCtx.webServer });
   },
   get(service) {
     if (service === "webServer") return fakeCtx.webServer;

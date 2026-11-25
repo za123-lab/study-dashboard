@@ -98,6 +98,15 @@ export function createDesktopLauncher(ctx, settings) {
     const windowState = await readJson(paths.windowState).catch(function () {
       return undefined;
     });
+    // 主题：settings.json 的 appearance.theme（system|dark|light），传给 Electron 与页面，壳和内容必须同一个值
+    let theme = "system";
+    try {
+      const raw = await readJson(path.join(paths.home, "settings.json"));
+      const value = raw && raw.appearance ? raw.appearance.theme : undefined;
+      if (value === "dark" || value === "light" || value === "system") theme = value;
+    } catch {
+      theme = "system";
+    }
     const mainScript = settings.mainScript;
     const env = Object.assign({}, process.env);
     // 宿主也是 Electron 时这个变量会让子进程进纯 Node 模式 → require('electron') 立刻失败
@@ -105,6 +114,7 @@ export function createDesktopLauncher(ctx, settings) {
     env.DSH_STUDY_WIDGET_URL = widgetUrl(origin, settings.token());
     env.DSH_STUDY_WIDGET_APP_ID = APP_ID;
     env.DSH_STUDY_WIDGET_STATE_FILE = paths.windowState;
+    env.DSH_STUDY_WIDGET_THEME = theme;
     if (settings.iconPath) env.DSH_STUDY_WIDGET_ICON = settings.iconPath;
     if (windowState) env.DSH_STUDY_WIDGET_BOUNDS = JSON.stringify(windowState);
 

@@ -9,7 +9,7 @@
 | --- | --- | --- | --- |
 | 网页版 | 仓库根目录 `index.html` / `style.css` / `app.js` | 原生 HTML/CSS/JS，零构建 | GitHub Pages（推 `main` 自动发布） |
 | 微信小程序 | `miniapp/` | Taro 4.1.9 + React 18 + TypeScript（designWidth 375） | 微信公众平台 · 开发版（当前 1.1.8，待手动设为体验版） |
-| 桌面小组件 | `plugins/study-widget/` | DSH 插件 + Electron 无边框窗口，只读同一份 Supabase 数据 | 本机（DSH profile `desktop` 的 link 依赖） |
+| 桌面小组件 | `plugins/study-widget/` | DSH 插件 + Electron 无边框窗口，读写同一份 Supabase 数据（可勾待办、按节次打卡） | 本机（DSH profile `desktop` 的 link 依赖） |
 
 两端共用同一套数据结构和云同步协议，数据默认只存本机，开启云同步后可互相同步。
 
@@ -132,6 +132,16 @@ study-dashboard/
 ```
 
 ## 7. 近期已完成
+
+- **小窗打卡改弹层，支持按节次一天多次（本轮）**：点打卡项从「行内填分钟」换成弹层，默认选中
+  **当前节次**（该课程第一个没看完的课时），可手动切节次、填本次时长；**每次打卡写一条独立记录**，
+  一节看完后下次自动落到下一节。写入同步更新 `activity` / `details` 与课时 `watchedMin`，口径与网页端
+  `recordDetail` / `addCheckinLog` 一致；新增 `POST /api/checkin/log`、`POST /api/checkin/unlog` 两个接口，
+  写入走 `rev` 乐观锁，插件从「只读」变为「可写待办与打卡」。
+  详见 [10 桌面小组件插件](wiki/10-desktop-widget-plugin.md) 第 6.1 节与[插件 README](../plugins/study-widget/README.md#61-打卡一天可多次)。
+- **修「随 DSH 启动自动打开小窗」不生效**：旧实现只读插件配置 `cfg.autoOpen`，而 profile 的 `insert` 行从不给
+  `config`，导致设置页开关写了也无效。现在优先读 `settings.json` 的 `desktop.autoOpen`，并用 `ctx.inject(["webServer"])`
+  等 `getOrigin()` 就绪后再开窗，日志会打印 `autoOpen=…（来源：settings.json）`（wiki 踩坑 19）。
 
 - **面板内「设置」入口（本轮补完）**：`client.js` 的 `makePanel` 增加 `view` 状态（`data` / `settings`），
   顶栏改为「进度 | 设置」等宽分段控件（`role=tablist`，`aria-selected` 同步），点「设置」在**同一 iframe** 内把 `?mode=panel`

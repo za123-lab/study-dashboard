@@ -14,7 +14,7 @@
  *   - 页面可能在 DSH 内被 iframe 嵌入，也可能直接路由打开；**没有** window.studyWidget
  *     （那是 Electron preload 才会注入的东西），所以一律走 fetch。
  *   - 密码永远不回传：hasPassword=true 时输入框只显示占位「已保存（留空则不改）」。
- *   - 保存时只 POST 有变化的字段；改到需要重启的属性时额外提示「下次打开小窗生效」。
+ *   - 保存时只 POST 有变化的字段；改到需要改后才生效的属性时额外提示「下次打开小窗生效」。
  */
 (function () {
   "use strict";
@@ -46,13 +46,51 @@
   // 改了只影响「下次打开小窗」的属性
   var RESTART_PATHS = ["advanced.electronPath", "desktop.width", "desktop.height", "desktop.autoOpen", "desktop.alwaysOnTop"];
 
+  /*
+   * 分区图标：内联 SVG，不用 emoji。
+   * emoji 在不同系统上字形/配色不一致（同一个窗口 emoji 在部分 Windows 上是蓝天窗口、在别处是方块），
+   * 也没法跟随主题色。SVG 用 stroke=currentColor，直接吃 .section-link 的文字颜色。
+   */
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var SECTION_PATHS = {
+    connection: ["M9.5 14.5 14.5 9.5", "M8 11 6.2 12.8a3.9 3.9 0 0 0 5.5 5.5L13.5 16.5", "M16 13l1.8-1.8a3.9 3.9 0 0 0-5.5-5.5L10.5 7.5"],
+    window: ["M4.5 6.5h15v11h-15z", "M4.5 9.5h15"],
+    refresh: ["M20 11.5a8 8 0 1 0-2.3 5.6", "M20.2 5v4.6h-4.6"],
+    appearance: ["M12 3.8a8.2 8.2 0 1 0 0 16.4c1.2 0 1.8-.8 1.8-1.7 0-1.4-1.2-1.6-1.2-2.6 0-.8.7-1.4 1.6-1.4H16a4.2 4.2 0 0 0 4.2-4.2c0-3.6-3.7-6.5-8.2-6.5Z", "M8.2 10.2h.01", "M11 7.6h.01", "M14.4 7.9h.01"],
+    plugin: ["M9 4.5h2v2.2a1.8 1.8 0 0 0 3.6 0V4.5h2v3.1h2.2a1.4 1.4 0 0 1 1.4 1.4v2.3h-2.2a1.8 1.8 0 0 0 0 3.6h2.2v2.3a1.4 1.4 0 0 1-1.4 1.4H16.7"],
+    advanced: ["M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z", "M12 3.6v2M12 18.4v2M4.7 7.9l1.7 1M17.6 15.1l1.7 1M4.7 16.1l1.7-1M17.6 8.9l1.7-1"],
+    about: ["M12 20.2a8.2 8.2 0 1 0 0-16.4 8.2 8.2 0 0 0 0 16.4Z", "M12 11v5", "M12 7.8h.01"],
+  };
+
+  function sectionIcon(name, size) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.7");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var px = size || 15;
+    svg.setAttribute("width", String(px));
+    svg.setAttribute("height", String(px));
+    (SECTION_PATHS[name] || []).forEach(function (d) {
+      var p = document.createElementNS(SVG_NS, "path");
+      p.setAttribute("d", d);
+      svg.appendChild(p);
+    });
+    return svg;
+  }
+
   var SECTIONS = [
-    { id: "connection", icon: "🔗", label: "连接" },
-    { id: "window", icon: "🪟", label: "窗口" },
-    { id: "refresh", icon: "🔄", label: "数据与刷新" },
-    { id: "plugin", icon: "🧩", label: "插件" },
-    { id: "advanced", icon: "⚙️", label: "高级" },
-    { id: "about", icon: "ℹ️", label: "关于" },
+    { id: "connection", label: "连接" },
+    { id: "window", label: "窗口" },
+    { id: "refresh", label: "数据与刷新" },
+    { id: "appearance", label: "外观" },
+    { id: "plugin", label: "插件" },
+    { id: "advanced", label: "高级" },
+    { id: "about", label: "关于" },
   ];
 
   var SHELL = document.getElementById("shell");
@@ -63,6 +101,93 @@
   var BRAND_DOT = document.getElementById("brandDot");
   var PAGE_HINT = document.getElementById("pageHint");
   var BTN_RELOAD = document.getElementById("btnReload");
+
+  /* ---------- 主题 ----------
+   * 设置页大多数时候被 DSH 用 iframe 嵌进左栏面板里，这时必须跟着宿主走：
+   *   宿主 body 上有 data-ds-dark-theme → 深色；没有 → 浅色。
+   * 独立打开（Electron 小窗 --settings、或直接在浏览器里开）时跟随系统。
+   * 宿主切主题会改 body 的 class/attribute，这里用 MutationObserver 实时跟随。
+   */
+  var THEME_MEDIA = null;
+
+  function systemPrefersLight() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function hostPrefersLight() {
+    var html = document.documentElement;
+    var b = document.body;
+    if (html.hasAttribute("data-ds-dark-theme") || b.hasAttribute("data-ds-dark-theme")) return false;
+    // 只认宿主打的显式浅色标记。绝不能读 data-theme —— 那是 applyTheme 自己写的，
+    // 读它等于把自己的输出当输入，主题第一次算完就固定，宿主再切也不会跟。
+    if (html.getAttribute("data-ds-light-theme") === "true" || b.getAttribute("data-ds-light-theme") === "true") return true;
+    var bg = getComputedStyle(b).backgroundColor || "";
+    var m = bg.match(/rgba?\(([^)]+)\)/);
+    if (m) {
+      var p = m[1].split(",").map(function (x) {
+        return parseFloat(x);
+      });
+      var lum = (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255;
+      if (p.length < 4 || p[3] > 0.5) return lum > 0.55;
+    }
+    return systemPrefersLight();
+  }
+
+  /**
+   * applyTheme 自己会写 body 的 data-theme，而 MutationObserver 恰好监听这个属性。
+   * 没有这个闸门时：applyTheme 写入 → observer 触发 → observer 里再调 applyTheme →
+   * 又写入 → 无限同步递归，在 iframe 里点一下主题整页就锁死。
+   * 写入期间置位，observer 回调看到就跳过这一轮。
+   */
+  var APPLYING_THEME = false;
+
+  function applyTheme() {
+    if (APPLYING_THEME) return;
+    APPLYING_THEME = true;
+    try {
+      // 由宿主注入（embed 参数）或独立打开，都走同一套判定
+      var light = document.body.dataset.embed === "iframe" ? hostPrefersLight() : systemPrefersLight();
+      document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+      document.body.dataset.theme = light ? "light" : "dark";
+    } finally {
+      APPLYING_THEME = false;
+    }
+  }
+
+  applyTheme();
+  try {
+    THEME_MEDIA = window.matchMedia("(prefers-color-scheme: light)");
+    var onScheme = function () {
+      if (document.body.dataset.embed !== "iframe") applyTheme();
+    };
+    if (THEME_MEDIA.addEventListener) THEME_MEDIA.addEventListener("change", onScheme);
+    else if (THEME_MEDIA.addListener) THEME_MEDIA.addListener(onScheme);
+  } catch (e) {
+    THEME_MEDIA = null;
+  }
+  try {
+    var THEME_OBSERVER = new MutationObserver(function () {
+      // 自己写回 data-theme 引起的变化不算宿主切换，直接忽略（否则会自激递归）。
+      if (APPLYING_THEME) return;
+      if (document.body.dataset.embed !== "iframe") return;
+      // 用微任务再判定一次：宿主一次切换可能连续改好几个属性，
+      // 合并成一轮，避免中途用半更新的宿主状态算主题。
+      Promise.resolve().then(applyTheme);
+    });
+    // 只盯宿主会改的两样：class 和 data-ds-dark-theme。
+    // 不能再监听 data-theme —— 那是 applyTheme 自己写的，监听它会自激。
+    THEME_OBSERVER.observe(document.body, { attributes: true, attributeFilter: ["class", "data-ds-dark-theme"] });
+    THEME_OBSERVER.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-ds-dark-theme"],
+    });
+  } catch (e) {
+    /* 没有 MutationObserver 就保持首帧主题 */
+  }
 
   // 服务端整包快照 + 表单草稿（草稿里的 password 永远从空开始）
   var VIEW = null;
@@ -182,11 +307,38 @@
 
   // ---------- 提示（toast） ----------
 
+  /** toast 图标：内联 SVG，不用 ✓ ✕ ! 这类字形（缺字会变方块，也不跟随主题色） */
+  var TOAST_PATHS = {
+    ok: ["M5 12.5l4.2 4.2L19 7"],
+    error: ["M6.5 6.5l11 11M17.5 6.5l-11 11"],
+    warn: ["M12 7.5v6", "M12 17h.01"],
+  };
+
+  function toastIcon(tone) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.1");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("width", "12");
+    svg.setAttribute("height", "12");
+    (TOAST_PATHS[tone] || TOAST_PATHS.ok).forEach(function (d) {
+      var p = document.createElementNS(SVG_NS, "path");
+      p.setAttribute("d", d);
+      svg.appendChild(p);
+    });
+    return svg;
+  }
+
   function toast(message, tone, ttl) {
     if (!TOASTS) return;
-    var mark = tone === "error" ? "✕" : tone === "warn" ? "!" : "✓";
+    var kind = tone === "error" ? "error" : tone === "warn" ? "warn" : "ok";
     var node = el("div", { class: "toast", "data-tone": tone || "ok", role: tone === "error" ? "alert" : "status" }, [
-      el("span", { class: "toast-ic", text: mark }),
+      el("span", { class: "toast-ic" }, [toastIcon(kind)]),
       el("span", { text: message }),
     ]);
     TOASTS.appendChild(node);
@@ -530,6 +682,35 @@
     };
   }
 
+  /** 三选一分段控件（外观：跟随系统 / 深色 / 浅色） */
+  function segmentedField(path, opt) {
+    opt = opt || {};
+    var options = opt.options || [];
+    var current = (val(path) == null ? "" : String(val(path))) || opt.fallback || options[0].value;
+    var group = el("div", { class: "segmented", role: "radiogroup", "aria-label": opt.label || path });
+    options.forEach(function (item) {
+      var btn = el("button", {
+        type: "button",
+        class: "segmented-item",
+        role: "radio",
+        "aria-checked": item.value === current ? "true" : "false",
+        title: item.desc || null,
+      }, [item.label]);
+      btn.addEventListener("click", function () {
+        Array.prototype.forEach.call(group.children, function (n) {
+          n.setAttribute("aria-checked", n === btn ? "true" : "false");
+        });
+        setField(path, item.value);
+        if (opt.onChange) opt.onChange(item.value);
+      });
+      group.appendChild(btn);
+    });
+    return {
+      input: group,
+      node: el("div", { class: "field" }, [labelEl(opt.label || path, opt.tag, opt.tagTone), group, el("p", { class: "hint", text: opt.hint || "" })]),
+    };
+  }
+
   /** 只读信息行 */
   function readonlyRow(key, value, title) {
     return el("div", { class: "readonly-row" }, [
@@ -733,6 +914,65 @@
         [foot.node]
       ),
       card("数据目录", "只读展示，供排查用。", [readonlyRow("目录", home || "—", home)]),
+    ];
+  }
+
+  function themeLabel(v) {
+    if (v === "dark") return "深色";
+    if (v === "light") return "浅色";
+    return "跟随系统";
+  }
+
+  function buildAppearance() {
+    var theme = registerField("appearance", "appearance.theme", segmentedField("appearance.theme", {
+      label: "界面主题",
+      tag: "小窗 + 面板",
+      options: [
+        { value: "system", label: "跟随系统", desc: "系统切深浅色时，小窗与面板一起换" },
+        { value: "dark", label: "深色", desc: "强制深色玻璃，不受系统影响" },
+        { value: "light", label: "浅色", desc: "强制浅色玻璃，不受系统影响" },
+      ],
+      fallback: "system",
+      hint: "小窗外壳（Windows 11 原生亚克力）、小窗内容、DSH 左栏面板与设置页共用这一个开关。",
+      onChange: function (v) {
+        // 已打开的小窗不会即时换壳，但页面里的玻璃可以立刻预览。
+        // 统一走 APPLYING_THEME 闸门：直接写 data-theme 会惊动 MutationObserver，
+        // 在 iframe 里那条回调又会去算「宿主主题」，一来一回就是死循环。
+        try {
+          if (v === "dark" || v === "light") {
+            APPLYING_THEME = true;
+            try {
+              document.documentElement.setAttribute("data-theme", v);
+              document.body.dataset.theme = v;
+            } finally {
+              APPLYING_THEME = false;
+            }
+          } else {
+            applyTheme();
+          }
+        } catch (e) {
+          /* 预览失败不影响保存 */
+        }
+      },
+    }));
+
+    var desk = (VIEW && VIEW.desktop) || {};
+    var info = el("div", { class: "readonly-row-set" }, []);
+    info.appendChild(readonlyRow("材质", "Apple 液态玻璃（斜高光 + 半透明 + 亮顶边暗底边）"));
+    info.appendChild(readonlyRow("当前窗口主题", desk.live ? themeLabel(VIEW && VIEW.settings && VIEW.settings.appearance ? VIEW.settings.appearance.theme : "") : "小窗未运行"));
+    info.appendChild(readonlyRow("原生材质", "Windows 11 上小窗外壳用亚克力；跟随系统时由系统决定深浅", ""));
+
+    var foot = saveFoot("appearance");
+    BUILT.appearance = BUILT.appearance || { els: {}, foot: null };
+    BUILT.appearance.foot = foot;
+
+    return [
+      card(
+        "外观",
+        "小窗、DSH 左栏面板与设置页用的是同一套液态玻璃材质，深浅色只在这里定一次。",
+        [theme.node, info],
+        [foot.node]
+      ),
     ];
   }
 
@@ -1042,6 +1282,7 @@
     connection: buildConnection,
     window: buildWindow,
     refresh: buildRefresh,
+    appearance: buildAppearance,
     plugin: buildPlugin,
     advanced: buildAdvanced,
     about: buildAbout,
@@ -1053,7 +1294,7 @@
     clear(SECTIONS_NAV);
     SECTIONS.forEach(function (s) {
       var link = el("button", { type: "button", class: "section-link", "data-section": s.id, "aria-current": s.id === ACTIVE_SECTION ? "true" : "false" }, [
-        el("span", { class: "ic", "aria-hidden": "true", text: s.icon }),
+        el("span", { class: "ic", "aria-hidden": "true" }, [sectionIcon(s.id, 15)]),
         el("span", { text: s.label }),
       ]);
       link.addEventListener("click", function () {
@@ -1157,6 +1398,9 @@
       delete d.advanced.settingsFile;
       delete d.advanced.loginFile;
     }
+    // 外观分区新增：缺省时补上默认值，避免默认值被当成未保存的修改
+    if (!isObj(d.appearance)) d.appearance = { theme: "system" };
+    if (!d.appearance.theme) d.appearance.theme = "system";
     return d;
   }
 

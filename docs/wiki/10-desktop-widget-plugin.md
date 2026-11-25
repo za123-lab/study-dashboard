@@ -49,7 +49,7 @@ Supabase ◀───▶│ lib/source.js   登录/refresh/拉 public.study_stat
 
 | 文件 | 职责 | 不该做什么 |
 | --- | --- | --- |
-| `index.js` | 注册路由、`/api`、设置端点、agent 工具、`/study` 命令、按配置自动开窗 | 不写统计逻辑；不自己改 profile patch |
+| `index.js` | 注册路由、`/api`、设置端点、agent 工具、`/study` 命令、按 `desktop.autoOpen` 自动开窗 | 不写统计逻辑；不自己改 profile patch |
 | `client.js` | 注册 `sidebar.panellist` 入口 + `main` 主面板页；顶栏「进度 / 设置」分段切换同一 iframe 的两个页面；保留 `sidebarRightTabs` 右侧栏标签 | 不直接算数据 |
 | `lib/settings.js` | `settings.json` 读写与归一化、原子写、密码掩码（`hasPassword`） | 不发起网络请求 |
 | `lib/source.js` | 凭据读取（settings.json → login.json）、Supabase 认证与查询、快照落盘 | 不做展示格式化 |
@@ -103,6 +103,9 @@ DSH 的侧栏外壳（`@deepseek-ai/dsh-client-ui-sidebar`）把导航位分成�
 | 层 | 存哪 | 改法 | 生效 |
 | --- | --- | --- | --- |
 | 静态配置（`electronPath`、`autoOpen`、`stateFile`、`offline`） | profile 的 patch 层 | `configEditor` / 手改 patch | 需重载插件 |
+
+> `autoOpen` 特殊：设置页的 `desktop.autoOpen` **优先于**这里的静态配置，只有在 `settings.json` 里
+> 没有该布尔值时才回落静态配置（见踩坑 19）。
 | **运行时设置**（连接、窗口、刷新、数据、高级） | `~/.dsh/study-widget/settings.json`，原子写 | `POST /api/settings` | **立即**，不重启插件 |
 
 `settings.json` 与 `login.json` 同目录（`credentialPaths().home`），便于迁移；原子写复用 `lib/source.js` 里已有的
@@ -200,6 +203,8 @@ POST /api/desktop → { ok, desktop, applied?, message?, reused?, error? }
 | 待办紧急度 | 已逾期 / 24 小时内 / 7 天内 / 更远，四档，与 `DESIGN.md` 的颜色语义对应 |
 | 热力图色阶 | `<=0 → 0`、`<=15 → 1`、`<=45 → 2`、`<=90 → 3`、其余 `4` |
 | 打卡周期 | `daily` / `weekly`（自然周）/ `interval`（每隔 N 天） |
+| 当前节次 | `currentLesson()`：该课程**第一个 `totalMin > 0` 且 `watchedMin < totalMin`** 的课时；全看完返回 `null`。一节看完后自动落到下一节 |
+| 打卡计数 | 当天每有**一条 log** 记 1 次（一天多次就计多次），与小程序 `dayStats` 一致 |
 
 字段契约（`/api/summary` 的 `summary`）：
 
@@ -209,7 +214,10 @@ today{min,minText,streak,todosDone,todosOpen,checkins,checkinsTotal,todos[],next
 counts{overdue,today,week}
 todos{open,done,overdue[],soon[],week[],later[],doneToday[]}   # 每项含 title/pri/dueLabel/left/catLabel/urgency
 courses[{name,stats{pct,...},lessons[]}]
-checkins[{name,cadenceLabel,done,due,status}]
+checkins[{name,cadenceLabel,done,due,status,todayMin,totalLogs,
+          todayLogs[]{at,min,idx,lid,cid,note},            # 今天的每次打卡，一天可多条
+          current{id,idx,title,before,total,beforeText,totalText},  # 节次；全部看完为 null
+          lessonOptions[]{id,index,title,totalMin,watchedMin,done,totalText,watchedText,courseId}}]
 heat{cols,cells[70]{key,min,level}}   week[7]   totals{activityMin,activityText}
 ```
 
@@ -221,6 +229,8 @@ heat{cols,cells[70]{key,min,level}}   week[7]   totals{activityMin,activityText}
 | `/study` | 斜杠命令 | 无参开窗；`status` 打印一行进度 |
 | `/dsh-study-widget/settings` | HTTP 页面 | 设置页 |
 | `/dsh-study-widget/api/settings` 等 | HTTP 前缀路由 | 见 [插件 README 第 6 节](../../plugins/study-widget/README.md#6-http-接口) |
+| `POST /api/checkin/log` | HTTP 写入 | `{id, min, cid, lid, note?}` → `{ok, action:"checkin", checkin:{idx,min,todayMin,lessonBefore,lessonAfter,lessonDone,todays}, summary}` |
+| `POST /api/checkin/unlog` | HTTP 写入 | `{id, at}` → `{ok, action:"unlog", removed, checkin:{id,name,logs}, summary}` |
 
 鉴权：`?t=<token>`、DSH Cookie、或本机同源三种之一；其余 401。静态资源限制在 `assets/` 内，越界 403/404。
 
@@ -243,6 +253,24 @@ heat{cols,cells[70]{key,min,level}}   week[7]   totals{activityMin,activityText}
 
 `/api/sources` 的摘要字段：`{rev, updatedAt, origin, courses, lessons, todos, todoOpen, email, checkins, activityDays}`；
 `import` 额外返回 `missing / savedTo / backup`（导入前把旧 `latest.json` 备份成 `latest.json.bak`）。
+
+### 6.1 打卡写入（`lib/mutate.js`）
+
+一次 `logCheckin` 在**同一份深拷贝**上做四处改动，全部靠 `rev` 乐观锁提交（冲突最多重试 2 次）：
+
+| 写入 | 规则 | 对应网页端 |
+| --- | --- | --- |
+| `checkins[].logs` | `push {date, at, min, cid, lid, idx, note?}`，**每条独立、不合并** | `addCheckinLog` |
+| `activity[today]` | `+= min` | `addActivity` |
+| `details[today]` | 同 cid+lid 合并累加，新建时带 `idx` | `recordDetail` |
+| `lessons[].watchedMin` | `min(cap, watchedMin + min)`，`cap = totalMin > 0 ? totalMin : 9999`（与小程序一致） | `onRunCheckin` |
+
+为什么**每次独立一条**而不是当天合并：用户要能回答「今天第几次打卡、每次看了多久」，
+这和小程序「按天去重算 1 次打卡、但允许累加多条 log」的口径一致。
+`logs` 上限 1000 条（`MAX_LOGS`），超出从头裁剪。
+
+撤销（`removeCheckinLog`）**只删 log**，不回滚 `activity` / `details` / `watchedMin` ——
+网页端同样没有反算逻辑，回滚会让两端统计对不上。
 
 ## 7. 踩坑记录（改代码前先看）
 
@@ -286,6 +314,17 @@ heat{cols,cells[70]{key,min,level}}   week[7]   totals{activityMin,activityText}
 18. **新增的 lib 文件必须重启 DSH 才会被加载**：热重载只对**已加载**的文件生效；
     `lib/settings-routes.js` / `lib/settings.js` / `lib/supabase.js` 这类**新文件**在旧进程里不会被重新 `import`，
     表现为「代码明明写了但路由还是 404」。改完新文件先重启 DSH，再判断是不是别的问题。
+19. **`autoOpen` 曾经读错来源（真踩过）**：旧写法只认插件配置 `cfg.autoOpen`，但 profile 的
+    `insert` 行从不给 `config`，于是这个值永远是 `undefined` —— **设置页的「随 DSH 启动自动打开小窗」
+    写了也不生效**，表现为「开关是开的，但启动 DSH 后小窗不出现」。现在先读 `settings.json` 的
+    `desktop.autoOpen`，只有它缺失时才回落插件配置；并且用 `ctx.inject(["webServer"])` 等
+    `getOrigin()` 可用后才开窗，不再用裸 `setTimeout` 赌时序。
+20. **CRLF 文件改写脚本的锚点坑**：本仓库多数文件是 CRLF。用 `fs.readFileSync` + `s.replace(锚点, …)`
+    改文件时，锚点字符串若按 `\n` 写会**静默匹配失败**（`includes` 返回 false）。改写脚本里先把锚点
+    `replace(/\r?\n/g, "\r\n")` 统一，或直接用编辑工具，不要用内联命令拼多行锚点。
+21. **打卡弹层是纯前端组件**：`widget.js` 的 `openCheckinSheet` 只认 `summary.checkins[i]` 里已有的
+    `current` / `lessonOptions` / `todayLogs`。往弹层加字段时，先改 `lib/summary.js` 的投影，
+    再改前端 —— 前端不要自己去 `courses` 里找节次，否则「课程被删」「没绑课程」这两条分支会各写一遍。
 
 ## 8. 自测与验证
 
@@ -298,13 +337,25 @@ node plugins/study-widget/scripts/smoke-settings.mjs  # 77 项，零依赖，不
 热力图 70 格）、`/api/status`、未知接口 404、路径越权不泄露源码；设置侧覆盖读取与掩码、保存回读、测试连接失败语义、
 `NO_PLUGIN_MANAGER` 降级。数据目录指向系统临时目录。
 
+打卡链路（`/api/checkin/log`、`/api/checkin/unlog`）目前靠人工 + 一次性验证脚本覆盖，**没有进 `smoke.mjs`**，
+因为 `index.js` 内部 `new StudySource()` 会打真实云端。要回归它，按下面三条手工确认即可：
+
+1. `summary.checkins[].current.idx` = 第一个没看完的节次；
+2. 同一天连打两次，`logs` 长度 +2，`activity[today]` 增加两次之和，`details[today]` 仍只有 1 条（合并）；
+3. 把某节补到 `totalMin` 后重开弹层，`current.idx` 自动 +1。
+
 小窗的实机验证只能人工看：`/api/status` 的 `desktop.running`、窗口是否出现在右上角、右键菜单五项、
 置顶后是否压在最前。截图归档在 [docs/shots](../../plugins/study-widget/docs/shots/)；
 完整的人工步骤见 [docs/ACCEPTANCE.md](../../plugins/study-widget/docs/ACCEPTANCE.md)。
 
 ## 9. 边界与后续
 
-- **只读**：插件不写 Supabase，打卡、改待办仍需网页版或小程序（写入走 `rev` 乐观锁，放在插件里会把冲突弹窗搬进小窗）。
+- **可写，但只写两件事**：待办勾选、打卡（含一天多次）。所有写入走 `lib/mutate.js` 的 `rev` 乐观锁，
+  冲突时基于服务端最新数据重试（最多 2 次），失败把 `error.code` 原样交给界面（不吞）。
+  其余数据（课程、课时总时长、循环打卡的增删改）仍只在网页版/小程序里改。
+- **撤销不回滚时长**：`/api/checkin/unlog` 只删 log 行，`activity` / `details` / `watchedMin` 保持不变，
+  与网页端口径一致。要「真正撤销」得在网页版改课时进度。
+- **小窗不是独立数据源**：弹层提交后由宿主回传整份 `summary` 重绘，小窗不自己维护一份课程/节次缓存。
 - **单用户**：与网页版一样用 Auth 登录自己的账号，不支持多账号切换。
 - 桌面小窗依赖 DSH 自带的 Electron（`$DSH_HOME/electron/electron.exe`），DSH 升级后路径变化会回落报错，需在
   设置页「高级」或 `/api/status` 里看 `execPath`。

@@ -106,64 +106,97 @@
 - [ ] **8.6 尺寸设置**：改 `width`/`height` 后重开小窗，尺寸随设置变化（且不超出屏幕可见区域）。
 - [ ] **8.7 窗口分区其余字段**：`autoOpen`（随 DSH 启动开窗）与「始终置顶」各自独立生效，互不覆盖；
   置顶调的 IPC 名与桌面端实际暴露的一致（`study-widget:set-always-on-top`），关闭后不影响位置记忆。
+- [ ] **8.7b `autoOpen` 真正生效（曾修过的 bug）**：设置页把「随 DSH 启动自动打开小窗」打开并保存 →
+  **完全退出 DSH 再启动** → 小窗自动出现；`$HOME/plugin.log` 有 `autoOpen=true（来源：settings.json）`
+  与 `autoOpen -> opened`。关掉该开关重启 → 不出小窗，日志为 `autoOpen=false`。
 - [ ] **8.8 无通道时的降级要对**：在**浏览器/主面板**里点置顶 → 返回 `applied:"persisted"` 并写进 `desktop.alwaysOnTop`
   （下次开窗生效），而不是假装已置顶；点隐藏 → 返回 `applied:"closed"`（关掉小窗）；小窗本来就没开时隐藏 → `applied:"noop"`；
   没有位置记录时 `GET /api/desktop` 的 `bounds` 是 `null`（前端不报错）。
 - [ ] **8.9 `pinnedSource` 语义对**：小窗运行时 `GET /api/desktop` 的 `pinnedSource` 为 `live`（读进程真实值）；
   小窗未运行时为 `settings`（读持久化配置）；两者都拿不到时才 `unknown`。
 
-## 9. 禁用再启用插件
+## 9. 打卡（弹层 · 按节次 · 一天多次）
 
-- [ ] **9.1 禁用**：插件管理里禁用 `@local/dsh-study-widget` → 左栏入口消失、宿主路由 404、工具 `study_widget_progress` 不可用。
-- [ ] **9.1b 数据保留**：禁用只影响入口与运行，`$HOME/settings.json` 与凭据文件不被删除（对照 11.5 的卸载语义：禁用 ≠ 卸载，两者都不自动删用户数据）。
-- [ ] **9.2 禁用不带崩**：禁用过程中 Electron 小窗被正常收掉，浏览器无未捕获异常刷屏。
-- [ ] **9.3 再启用**：重新启用 → 左栏入口回来、路由 200、面板照常出数据；**设置页仍显示禁用前的 URL / 邮箱与「已保存」密码状态**（入口与设置一起回来，无需重填）。
-- [ ] **9.4 设置不丢**：禁用→启用循环之后，设置页仍显示之前保存的 URL/邮箱与「已保存」密码状态。
-- [ ] **9.5 开关委托宿主**：执行禁用/启用的是宿主 `pluginManager` 服务（`setPluginEnabled` / `setBundleEnabled`），
+> 前置：账号里至少有一门课、且其中至少有一节「有总时长但没看完」，否则走 9.8 的空态分支。
+
+- [ ] **9.1 弹层能开**：点小窗/面板里任意打卡项 → 出现弹层（遮罩 + 卡片），标题是打卡项名字，**不是**行内输入框。
+- [ ] **9.2 默认当前节次**：视频打卡的「节次」下拉默认选中**第一个没看完的课时**（不是第 1 节，也不是上次选的）。
+  与 `GET /api/summary` 的 `checkins[i].current.idx` 一致。
+- [ ] **9.3 切换节次刷新进度**：下拉换成已看完的节 → 提示「这一节已看完，可以换下一节」；
+  换成未看完的节 → 提示 `已看 x:xx / y:yy · 还剩 z:zz`，且数字与该课程课时进度一致。
+- [ ] **9.4 时长三种写法都能过**：分别填 `25`、`0:25`、`25分钟`，提交后都要记成 25 分钟；
+  填 `0:75` / 空 / 负数 → 脚注报错、不提交（`MIN_REQUIRED` 或前端拦截）。
+- [ ] **9.5 一天多次 = 多条独立记录**：同一天对同一节连打两次（如 +20、+15）→
+  弹层顶部显示「今天已记 2 次 · 共 0:35」，并逐条列出两条（时间 + 第 N 节 + 分钟）；
+  `GET /api/summary` 的 `checkins[i].todayLogs.length === 2`。
+- [ ] **9.6 写入口径正确**（在 `GET /api/summary` 或网页版核对）：
+  `activity[今天]` 增加两次之和；`details[今天]` 里同课程同节**仍只有 1 条**且分钟为两次之和；
+  该节 `watchedMin` 增加对应分钟。
+- [ ] **9.7 看完自动跳下一节**：把当前节补到 `totalMin` 后重开弹层 → 默认节次自动变成下一节；
+  若这是最后一节 → 显示「全部看完」且不能再选未完成的节。
+- [ ] **9.8 空态**：课程一节都没有 → 弹层提示「这门课还没有课时，先去网页版添加一节」，打卡按钮禁用；
+  打卡项未绑课程 → 不崩，按当前课程节次处理或提示。
+- [ ] **9.9 自定义打卡**：非视频打卡项也能一天多次，弹层不显示节次与时长，只记次数与时间，`details` 不受影响。
+- [ ] **9.10 云端一致性**：打卡后打开网页版刷新，今日学习时长、课时进度、当日明细与弹层显示一致（两端口径未分叉）。
+- [ ] **9.11 撤销单条**：`POST /api/checkin/unlog {id, at}` 后该条从 `todayLogs` 消失，
+  但 `activity` / `details` / `watchedMin` **保持不变**（设计如此，见 wiki 第 9 节）。
+- [ ] **9.12 只读数据源拒绝写入**：把「离线模式」打开或 `stateFile` 指向本地文件后再打卡 →
+  返回 `READ_ONLY_SOURCE`，界面提示「当前数据来自本地文件/缓存，不能写回云端」，**不**假成功。
+- [ ] **9.13 冲突重试**：在手机上同时改同一份数据 → 小窗打卡仍成功（`rev` 乐观锁重试），无 409 弹错。
+
+## 10. 禁用再启用插件
+
+- [ ] **10.1 禁用**：插件管理里禁用 `@local/dsh-study-widget` → 左栏入口消失、宿主路由 404、工具 `study_widget_progress` 不可用。
+- [ ] **10.1b 数据保留**：禁用只影响入口与运行，`$HOME/settings.json` 与凭据文件不被删除（对照 12.5 的卸载语义：禁用 ≠ 卸载，两者都不自动删用户数据）。
+- [ ] **10.2 禁用不带崩**：禁用过程中 Electron 小窗被正常收掉，浏览器无未捕获异常刷屏。
+- [ ] **10.3 再启用**：重新启用 → 左栏入口回来、路由 200、面板照常出数据；**设置页仍显示禁用前的 URL / 邮箱与「已保存」密码状态**（入口与设置一起回来，无需重填）。
+- [ ] **10.4 设置不丢**：禁用→启用循环之后，设置页仍显示之前保存的 URL/邮箱与「已保存」密码状态。
+- [ ] **10.5 开关委托宿主**：执行禁用/启用的是宿主 `pluginManager` 服务（`setPluginEnabled` / `setBundleEnabled`），
   验证 `cordis.patch.yml` 的变更由宿主写入（`git diff` 可见 `disabled:` 由宿主加/删），插件自身代码不参与写 YAML；
   插件拿不到该服务时应返回 `NO_PLUGIN_MANAGER` 而不是自己改文件。
-- [ ] **9.6 禁用保留数据目录**：禁用后 `$HOME` 下 `settings.json` / `login.json` / `window.json` **原样存在且内容未变**
+- [ ] **10.6 禁用保留数据目录**：禁用后 `$HOME` 下 `settings.json` / `login.json` / `window.json` **原样存在且内容未变**
   （禁用不等于清空设置；这是委托实现最容易踩的坑 —— 宿主 reload 时若误清了数据目录即失败）。
-- [ ] **9.7 `unaddressable` 不谎报**：若宿主返回 `applied: "failed"` + `error.code: "unaddressable"`（`include` 行挂载的插件会出现），
+- [ ] **10.7 `unaddressable` 不谎报**：若宿主返回 `applied: "failed"` + `error.code: "unaddressable"`（`include` 行挂载的插件会出现），
   页面必须如实显示失败并给出「请到 DSH『设置 → 插件』里操作，或重启 DSH 后生效」的出路，**不能**显示「已禁用/已启用」。
-- [ ] **9.8 `restart` 的 partial 语义**：若禁用阶段就失败，返回 `{ok:false, partial:true}` 且消息为「已尝试禁用但失败，插件仍在运行」；
+- [ ] **10.8 `restart` 的 partial 语义**：若禁用阶段就失败，返回 `{ok:false, partial:true}` 且消息为「已尝试禁用但失败，插件仍在运行」；
   此时插件**确实仍在运行**（用左栏入口是否还在验证），页面不得显示成已重载。
-- [ ] **9.9 不会悄悄换用 bundle 通道**：不传 `packageName` 时只走 `setPluginEnabled`；
+- [ ] **10.9 不会悄悄换用 bundle 通道**：不传 `packageName` 时只走 `setPluginEnabled`；
   验证手段：宿主日志或 mock 里 `setBundleEnabled` **没有被调用**（除非请求显式带了 `packageName`）。
 
-## 10. 数据持久化（重启后设置仍在）
+## 11. 数据持久化（重启后设置仍在）
 
-- [ ] **10.1 正常退出重启**：关闭 DSH → 重新启动 → 左栏入口、设置页、连接状态全部还原，无需重新输入密码。
-- [ ] **10.2 强杀重启**：任务管理器强杀 DSH 后重启 → `settings.json` 仍是合法 JSON（未被写坏），设置仍在。
-- [ ] **10.3 token 续期**：相隔较久（> access token 有效期）后重开，凭 refresh token 自动续期成功，不需重新输密码。
-- [ ] **10.4 清除密码后行为**：在设置页「清除密码」→ `hasPassword` 变 false；重启后仍是未保存密码状态，不会偷偷复用旧 token。
+- [ ] **11.1 正常退出重启**：关闭 DSH → 重新启动 → 左栏入口、设置页、连接状态全部还原，无需重新输入密码。
+- [ ] **11.2 强杀重启**：任务管理器强杀 DSH 后重启 → `settings.json` 仍是合法 JSON（未被写坏），设置仍在。
+- [ ] **11.3 token 续期**：相隔较久（> access token 有效期）后重开，凭 refresh token 自动续期成功，不需重新输密码。
+- [ ] **11.4 清除密码后行为**：在设置页「清除密码」→ `hasPassword` 变 false；重启后仍是未保存密码状态，不会偷偷复用旧 token。
 
-## 11. 卸载不残留
+## 12. 卸载不残留
 
-- [ ] **11.1 卸载**：DSH 插件管理卸载 `@local/dsh-study-widget` → 左栏入口消失、路由 404。
-- [ ] **11.2 profile 干净**：卸载后 profile 的 `package.json` 里不再有 `@local/dsh-study-widget`（依赖与 `dsh.profile.bundles` 都清掉）；`cordis.patch.yml` 无遗留 `dsh-study-widget` 条目。
-- [ ] **11.3 渲染层干净**：DSH 页面无该插件注入的 `<style>`、无残留 `main`/`panellist` 注册；控制台无该插件报错。
-- [ ] **11.4 进程干净**：卸载后无遗留 Electron 小窗进程（任务管理器无 `study-widget` 相关进程）。
-- [ ] **11.5 数据目录按预期保留**：`$HOME` 下的 `login.json` / `settings.json` / `latest.json` / `window.json` **不被卸载自动删除**（用户数据，需手动清理），且文档里写明了这一点。
-- [ ] **11.6 重装可恢复**：重新安装 → 读取 `$HOME` 里既有设置，无需重填凭据。
+- [ ] **12.1 卸载**：DSH 插件管理卸载 `@local/dsh-study-widget` → 左栏入口消失、路由 404。
+- [ ] **12.2 profile 干净**：卸载后 profile 的 `package.json` 里不再有 `@local/dsh-study-widget`（依赖与 `dsh.profile.bundles` 都清掉）；`cordis.patch.yml` 无遗留 `dsh-study-widget` 条目。
+- [ ] **12.3 渲染层干净**：DSH 页面无该插件注入的 `<style>`、无残留 `main`/`panellist` 注册；控制台无该插件报错。
+- [ ] **12.4 进程干净**：卸载后无遗留 Electron 小窗进程（任务管理器无 `study-widget` 相关进程）。
+- [ ] **12.5 数据目录按预期保留**：`$HOME` 下的 `login.json` / `settings.json` / `latest.json` / `window.json` **不被卸载自动删除**（用户数据，需手动清理），且文档里写明了这一点。
+- [ ] **12.6 重装可恢复**：重新安装 → 读取 `$HOME` 里既有设置，无需重填凭据。
 
 ---
 
-## 12. 回归与提交
+## 13. 回归与提交
 
-- [ ] **12.1** 文档与代码同一次提交：`README.md`、`docs/wiki/10-desktop-widget-plugin.md`、`docs/wiki/README.md`、`docs/PROJECT-STATUS.md`、本文件与代码一并提交。
-- [ ] **12.2** 提交前 `git grep` 确认无密钥：搜 `eyJ`、`supabase.co`、真实邮箱、密码字段的明文。
-- [ ] **12.3** 截图归档到 `plugins/study-widget/docs/shots/`：设置页（连接分区主视图）+ 左栏入口 + 主面板，共 2~3 张，README 引用路径可打开。
-- [ ] **12.4** 无回归：网页版 `index.html` 打开正常、小程序代码未改动（`git status` 核对）。
-- [ ] **12.5** 数据分区：`stateFile` 指定一份导出 JSON 后，面板改从该文件读取（便于离线/演示）；
+- [ ] **13.1** 文档与代码同一次提交：`README.md`、`docs/wiki/10-desktop-widget-plugin.md`、`docs/wiki/README.md`、`docs/PROJECT-STATUS.md`、本文件与代码一并提交。
+- [ ] **13.2** 提交前 `git grep` 确认无密钥：搜 `eyJ`、`supabase.co`、真实邮箱、密码字段的明文。
+- [ ] **13.3** 截图归档到 `plugins/study-widget/docs/shots/`：设置页（连接分区主视图）+ 左栏入口 + 主面板 + 打卡弹层
+  （`widget-checkin.png`），README 引用路径可打开。
+- [ ] **13.4** 无回归：网页版 `index.html` 打开正常、小程序代码未改动（`git status` 核对）。
+- [ ] **13.5** 数据分区：`stateFile` 指定一份导出 JSON 后，面板改从该文件读取（便于离线/演示）；
   `homeDir` 只读展示真实数据目录，页面上没有任何能改坏它的可写控件。
-- [ ] **12.6** 数据快照往返：高级分区「导出快照」得到的文本再「导入快照」→ 数据一致；导入前旧 `latest.json` 会备份成 `latest.json.bak`（响应 `backup` 给出路径）。
-- [ ] **12.7** 只读字段对外可见：`GET /api/settings` 的 `advanced.settingsFile` / `loginFile` 是绝对路径，
+- [ ] **13.6** 数据快照往返：高级分区「导出快照」得到的文本再「导入快照」→ 数据一致；导入前旧 `latest.json` 会备份成 `latest.json.bak`（响应 `backup` 给出路径）。
+- [ ] **13.7** 只读字段对外可见：`GET /api/settings` 的 `advanced.settingsFile` / `loginFile` 是绝对路径，
   且 `settings.json` **文件里没有**这两个键（不落盘）。
-- [ ] **12.8** 接线顺序回归：冷启动 DSH 后，`/api/settings`、`/api/desktop`、`/api/plugin`、`/api/sources` **四个都 200**
+- [ ] **13.8** 接线顺序回归：冷启动 DSH 后，`/api/settings`、`/api/desktop`、`/api/plugin`、`/api/sources` **四个都 200**
   （不全 404）。若只有它们 404 而 `/api/summary` 正常，说明 `index.js` 里 `desktop`/`settingsStore` 声明在
   `createSettingsRoutes(...)` 之后被 TDZ 吞了 —— 按 wiki 踩坑 17 修顺序：`settingsStore → webServer → desktop → settingsRoutes`。
-- [ ] **12.9** 新增 lib 文件后重启验证：改 `lib/settings.js` / `lib/settings-routes.js` / `lib/supabase.js` 后，
+- [ ] **13.9** 新增 lib 文件后重启验证：改 `lib/settings.js` / `lib/settings-routes.js` / `lib/supabase.js` 后，
   **重启 DSH** 再验证路由生效（热重载不加载新文件，见 wiki 踩坑 18）。
 
 ---
@@ -172,4 +205,4 @@
 
 1. 记录编号 + 实际观察 + 期望，写进本次交付说明，**不要**自行修改产品代码去迁就清单。
 2. 接口字段与文档不一致时，以 TEAM-BRIEF 第 4 节契约为准判定「实现错」还是「文档错」，报 lead 裁决。
-3. 安全类条目（0.3 / 0.4 / 4.4 / 6.3 / 11.5）任一失败即阻断交付，其余条目可按 lead 决定降级为「已知问题」并在 `docs/PROJECT-STATUS.md` 记入遗留。
+3. 安全类条目（0.3 / 0.4 / 4.4 / 6.3 / 12.5）任一失败即阻断交付，其余条目可按 lead 决定降级为「已知问题」并在 `docs/PROJECT-STATUS.md` 记入遗留。

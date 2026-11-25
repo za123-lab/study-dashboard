@@ -71,6 +71,42 @@ export function courseStats(course) {
   };
 }
 
+/**
+ * 节次定位：当前该打卡的是哪一节。
+ * 规则与小程序 onRunCheckin 一致——取第一个「有总时长但还没看完」的课时；
+ * 这一节看完后，下一次自然落到下一节。全都看完返回 null。
+ */
+export function currentLesson(course) {
+  if (!course || !Array.isArray(course.lessons)) return null;
+  for (let i = 0; i < course.lessons.length; i++) {
+    const lesson = course.lessons[i];
+    if (!lesson) continue;
+    const total = Number(lesson.totalMin) || 0;
+    const before = Number(lesson.watchedMin) || 0;
+    if (total > 0 && before < total) return { course, lesson, index: i + 1, before, total };
+  }
+  return null;
+}
+
+/** 课程的节次列表：给打卡弹窗做「切到别的节次」用 */
+export function lessonOptions(course) {
+  if (!course || !Array.isArray(course.lessons)) return [];
+  return course.lessons.map(function (lesson, i) {
+    const total = Number(lesson.totalMin) || 0;
+    const before = Number(lesson.watchedMin) || 0;
+    return {
+      id: lesson.id,
+      index: i + 1,
+      title: lesson.title || "第 " + (i + 1) + " 节",
+      totalMin: total,
+      watchedMin: before,
+      done: total > 0 ? before >= total : false,
+      totalText: total > 0 ? fmtDur(total) : "—",
+      watchedText: fmtDur(before),
+    };
+  });
+}
+
 export function overallStats(courses) {
   const out = { totalMin: 0, watchedMin: 0, doneLessons: 0, count: 0, invalid: 0, pct: 0 };
   (courses || []).forEach(function (c) {

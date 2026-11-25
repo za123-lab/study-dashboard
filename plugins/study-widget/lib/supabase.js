@@ -2,12 +2,14 @@
  * Supabase 客户端（纯 HTTP，不依赖浏览器）。
  *
  * 与网页版 app.js 同一套协议：
- *   POST /auth/v1/token?grant_type=password      邮箱 + 密码换 access/refresh token
- *   POST /auth/v1/token?grant_type=refresh_token 用 refresh token 续期
- *   GET  /rest/v1/study_state?user_id=eq.<uid>&select=data,rev,updated_at
- * GET 遇到 401 会用 refresh token 重试一次。
+ *   POST  /auth/v1/token?grant_type=password      邮箱 + 密码换 access/refresh token
+ *   POST  /auth/v1/token?grant_type=refresh_token 用 refresh token 续期
+ *   GET   /rest/v1/study_state?user_id=eq.<uid>&select=data,rev,updated_at
+ *   PATCH /rest/v1/study_state?user_id=eq.<uid>&rev=eq.<baseRev>
+ *         body { data, rev: baseRev + 1 } —— 乐观锁整份覆盖，与网页端 updateRemote 一致
+ * GET / PATCH 遇到 401 都会用 refresh token 重试一次。
  *
- * 只读：本模块没有任何写 Supabase 的代码路径。
+ * 默认只读；写入只经由 patchState()，由调用方（lib/mutate.js）在用户显式操作后触发。
  */
 
 const TIMEOUT_MS = 15000;
@@ -226,11 +228,82 @@ export function createClient(options) {
     return out;
   }
 
+  /**
+   * 带乐观锁的整份 state 写回（与网页端 updateRemote 同一套协议）。
+   *
+   * 请求：PATCH /rest/v1/study_state?user_id=eq.<uid>&rev=eq.<baseRev>
+   * body：{ data, rev: baseRev + 1 }
+   *
+   * 返回三种结果，调用方据此决定是否重试：
+   *   { ok: true,  row }                    写入成功，row 是服务端回传的新行
+   *   { ok: false, conflict: true, remote } 云端 rev 已经变了（PATCH 匹配 0 行），
+   *                                         remote 是最新的整行，调用方应该基于它再改一次
+   *   { ok: false, error }                  其它失败（网络 / 权限 / 表不存在）
+   *
+   * @param {number} baseRev 本次修改所基于的 rev（必须是刚从云端读到的那个值）
+   * @param {object} data    完整的 state.data（整份覆盖，不是差量）
+   */
+  async function patchState(baseRev, data) {
+    assertConfigured();
+    const base = Number(baseRev);
+    if (!Number.isFinite(base) || base <= 0) {
+      throw new SupabaseError("BAD_REV", "写入需要一个有效的基线版本号");
+    }
+    if (!data || typeof data !== "object") {
+      throw new SupabaseError("BAD_DATA", "写入的数据必须是对象");
+    }
+    let current = await signIn();
+    const endpoint =
+      url +
+      "/rest/v1/study_state?user_id=eq." +
+      encodeURIComponent(current.userId) +
+      "&rev=eq." +
+      String(base);
+    const request = function () {
+      return timedFetch(endpoint, {
+        method: "PATCH",
+        headers: Object.assign(headers(anonKey, current.accessToken), {
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        }),
+        body: JSON.stringify({ data: data, rev: base + 1 }),
+      });
+    };
+    let res = await request();
+    if (res.status === 401) {
+      // 与 fetchState 一致：401 换一次 token 再打
+      if (!current.refreshToken) {
+        const body = await readBody(res);
+        throw new SupabaseError("REST_FAILED", restErrorText(res.status, body), res.status);
+      }
+      current = await refreshSession(current.refreshToken);
+      res = await request();
+    }
+    if (!res.ok) {
+      const body = await readBody(res);
+      return { ok: false, error: restErrorText(res.status, body), status: res.status };
+    }
+    const rows = await readBody(res);
+    // rev 条件没匹配上时 PostgREST 返回空数组：云端已经被别处改过
+    if (!Array.isArray(rows) || rows.length === 0) {
+      let remote = null;
+      try {
+        const fresh = await fetchState();
+        remote = { data: fresh.data, rev: fresh.rev, updatedAt: fresh.updatedAt };
+      } catch {
+        remote = null;
+      }
+      return { ok: false, conflict: true, remote: remote };
+    }
+    return { ok: true, row: rows[0] };
+  }
+
   return {
     url,
     signIn,
     refreshSession,
     fetchState,
+    patchState,
     testConnection,
     get session() {
       return session;
